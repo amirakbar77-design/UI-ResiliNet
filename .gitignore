@@ -38,3 +38,6 @@ next-env.d.ts
 /.wrangler/
 /outputs/
 /work/
+
+# build-time data cache (raw DEM tiles, imagery tiles)
+.cache/

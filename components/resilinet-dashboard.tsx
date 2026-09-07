@@ -1,6 +1,12 @@
 'use client';
 
-import { lazy, Suspense, useState, type ComponentType, type CSSProperties } from 'react';
+import {
+  lazy,
+  Suspense,
+  useState,
+  type ComponentType,
+  type CSSProperties,
+} from 'react';
 import {
   Antenna,
   BookOpen,
@@ -26,7 +32,6 @@ import {
   Settings,
   ShieldCheck,
   Signal,
-  TriangleAlert,
   UserRound,
   Users,
   Waves,
@@ -39,16 +44,22 @@ import { Slider } from '@/components/ui/slider';
 import { Switch } from '@/components/ui/switch';
 
 type LayerKey = 'coverage' | 'towers' | 'flood' | 'roads' | 'population';
-type IconComponent = ComponentType<{ className?: string; 'aria-hidden'?: boolean }>;
+type IconComponent = ComponentType<{
+  className?: string;
+  'aria-hidden'?: boolean;
+}>;
 
-const mapboxToken = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
-const LiveTerrainMap = lazy(() =>
-  import('@/components/live-terrain-map').then((module) => ({
-    default: module.LiveTerrainMap,
+const Terrain3D = lazy(() =>
+  import('@/components/terrain-3d').then((module) => ({
+    default: module.Terrain3D,
   })),
 );
 
-const layerOptions: Array<{ key: LayerKey; label: string; icon: IconComponent }> = [
+const layerOptions: Array<{
+  key: LayerKey;
+  label: string;
+  icon: IconComponent;
+}> = [
   { key: 'coverage', label: 'Network Coverage', icon: Signal },
   { key: 'towers', label: 'Current Tower Status', icon: RadioTower },
   { key: 'flood', label: 'Flood Hazards', icon: Waves },
@@ -90,17 +101,22 @@ function TopBar() {
         </div>
       </div>
 
-      <nav aria-label="Primary navigation" className="ml-auto hidden items-center gap-7 lg:flex">
-        {['Global', 'Developers', 'Develops', 'About', 'Contact'].map((item) => (
-          <button
-            key={item}
-            type="button"
-            className="flex min-h-11 items-center gap-1.5 text-sm text-slate-300 transition-colors hover:text-white"
-          >
-            {item === 'Global' && <Globe2 className="size-4" aria-hidden />}
-            {item}
-          </button>
-        ))}
+      <nav
+        aria-label="Primary navigation"
+        className="ml-auto hidden items-center gap-7 lg:flex"
+      >
+        {['Global', 'Developers', 'Develops', 'About', 'Contact'].map(
+          (item) => (
+            <button
+              key={item}
+              type="button"
+              className="flex min-h-11 items-center gap-1.5 text-sm text-slate-300 transition-colors hover:text-white"
+            >
+              {item === 'Global' && <Globe2 className="size-4" aria-hidden />}
+              {item}
+            </button>
+          ),
+        )}
       </nav>
 
       <div className="ml-auto flex items-center gap-2 lg:ml-5">
@@ -126,16 +142,20 @@ function TopBar() {
           aria-label="Mobile navigation"
           className="glass-panel absolute right-3 top-[62px] w-52 rounded-xl p-2 lg:hidden"
         >
-          {['Global', 'Developers', 'Develops', 'About', 'Contact'].map((item) => (
-            <button
-              key={item}
-              type="button"
-              className="flex min-h-11 w-full items-center gap-2 rounded-lg px-3 text-left text-sm text-slate-200 hover:bg-slate-700/45"
-            >
-              {item === 'Global' && <Globe2 className="size-4 text-sky-300" aria-hidden />}
-              {item}
-            </button>
-          ))}
+          {['Global', 'Developers', 'Develops', 'About', 'Contact'].map(
+            (item) => (
+              <button
+                key={item}
+                type="button"
+                className="flex min-h-11 w-full items-center gap-2 rounded-lg px-3 text-left text-sm text-slate-200 hover:bg-slate-700/45"
+              >
+                {item === 'Global' && (
+                  <Globe2 className="size-4 text-sky-300" aria-hidden />
+                )}
+                {item}
+              </button>
+            ),
+          )}
         </nav>
       )}
     </header>
@@ -209,17 +229,53 @@ function MobileDock({ onOpenAnalysis }: { onOpenAnalysis: () => void }) {
 
 function TerrainFallback() {
   return (
-    <div className="terrain-fallback absolute inset-0 overflow-hidden" aria-hidden>
-      <svg className="absolute inset-0 size-full opacity-65" viewBox="0 0 1400 900" preserveAspectRatio="none">
+    <div
+      className="terrain-fallback absolute inset-0 overflow-hidden"
+      aria-hidden
+    >
+      <svg
+        className="absolute inset-0 size-full opacity-65"
+        viewBox="0 0 1400 900"
+        preserveAspectRatio="none"
+      >
         <defs>
           <filter id="soft-shadow" x="-20%" y="-20%" width="140%" height="140%">
-            <feDropShadow dx="0" dy="16" stdDeviation="18" floodColor="#102a24" floodOpacity=".35" />
+            <feDropShadow
+              dx="0"
+              dy="16"
+              stdDeviation="18"
+              floodColor="#102a24"
+              floodOpacity=".35"
+            />
           </filter>
         </defs>
-        <path d="M550 20 C760 70 1000 80 1230 250 C1320 320 1375 450 1400 560 L1400 0 Z" fill="#b5cb70" opacity=".2" />
-        <path d="M670 0 C820 90 990 140 1110 290 C1210 414 1250 565 1400 650" fill="none" stroke="#e5f3bd" strokeWidth="2" opacity=".27" />
-        <path d="M600 0 C750 130 906 190 1020 330 C1120 454 1175 640 1400 735" fill="none" stroke="#e5f3bd" strokeWidth="2" opacity=".22" />
-        <path d="M80 740 C250 610 360 650 500 550 C650 445 720 300 930 240" fill="none" stroke="#173f33" strokeWidth="80" opacity=".08" filter="url(#soft-shadow)" />
+        <path
+          d="M550 20 C760 70 1000 80 1230 250 C1320 320 1375 450 1400 560 L1400 0 Z"
+          fill="#b5cb70"
+          opacity=".2"
+        />
+        <path
+          d="M670 0 C820 90 990 140 1110 290 C1210 414 1250 565 1400 650"
+          fill="none"
+          stroke="#e5f3bd"
+          strokeWidth="2"
+          opacity=".27"
+        />
+        <path
+          d="M600 0 C750 130 906 190 1020 330 C1120 454 1175 640 1400 735"
+          fill="none"
+          stroke="#e5f3bd"
+          strokeWidth="2"
+          opacity=".22"
+        />
+        <path
+          d="M80 740 C250 610 360 650 500 550 C650 445 720 300 930 240"
+          fill="none"
+          stroke="#173f33"
+          strokeWidth="80"
+          opacity=".08"
+          filter="url(#soft-shadow)"
+        />
       </svg>
       <div className="absolute bottom-24 left-[18%] rounded-md border border-white/10 bg-slate-950/25 px-2 py-1 text-[11px] font-medium tracking-[0.08em] text-white/55 uppercase backdrop-blur-sm">
         Offline terrain preview
@@ -228,91 +284,37 @@ function TerrainFallback() {
   );
 }
 
-function PopulationMarker({ className, value }: { className: string; value: string }) {
+function TerrainStage({
+  layers,
+  timeline,
+  resetSignal,
+}: {
+  layers: Record<LayerKey, boolean>;
+  timeline: number;
+  resetSignal: number;
+}) {
   return (
-    <div className={`map-marker absolute flex -translate-x-1/2 -translate-y-full flex-col items-center ${className}`}>
-      <span className="mb-1.5 rounded-md border border-sky-200/30 bg-[#07131d]/85 px-2 py-1 text-xs font-semibold text-sky-100 backdrop-blur-sm">
-        ({value})
-      </span>
-      <MapPin className="size-7 fill-sky-400 text-white" />
-    </div>
-  );
-}
-
-function MapOverlays({ layers }: { layers: Record<LayerKey, boolean> }) {
-  return (
-    <div className="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden>
-      {layers.flood && (
-        <svg className="absolute inset-0 size-full" viewBox="0 0 1400 900" preserveAspectRatio="none">
-          <defs>
-            <filter id="river-glow" x="-30%" y="-30%" width="160%" height="160%">
-              <feGaussianBlur stdDeviation="8" result="blur" />
-              <feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>
-            </filter>
-          </defs>
-          <path d="M1080 -30 C1010 160 1100 250 970 360 C845 468 900 560 760 640 C618 721 600 790 540 940" fill="none" stroke="#38bdf8" strokeWidth="42" strokeLinecap="round" opacity=".22" filter="url(#river-glow)" />
-          <path d="M1080 -30 C1010 160 1100 250 970 360 C845 468 900 560 760 640 C618 721 600 790 540 940" fill="none" stroke="#0ea5e9" strokeWidth="19" strokeLinecap="round" opacity=".82" />
-          <path d="M1260 180 C1100 230 1090 305 976 360" fill="none" stroke="#67e8f9" strokeWidth="10" strokeLinecap="round" opacity=".72" />
-          <path d="M565 430 C700 460 760 520 810 595" fill="none" stroke="#38bdf8" strokeWidth="13" strokeLinecap="round" opacity=".7" />
-        </svg>
-      )}
-
-      {layers.roads && (
-        <svg className="absolute inset-0 size-full" viewBox="0 0 1400 900" preserveAspectRatio="none">
-          <path d="M150 710 C330 650 405 525 570 500 C750 472 885 535 1050 420 C1175 334 1260 286 1430 310" fill="none" stroke="#f8fafc" strokeWidth="5" opacity=".45" />
-          <path d="M560 501 C740 474 875 532 1048 420" fill="none" stroke="#fb5151" strokeWidth="7" strokeDasharray="15 13" strokeLinecap="round" opacity=".95" />
-        </svg>
-      )}
-
-      {layers.coverage && (
-        <div className="absolute left-[54%] top-[25%] h-[34%] w-[31%] -rotate-[11deg] rounded-[50%] border border-emerald-300/35 bg-emerald-300/12 shadow-[0_0_90px_rgb(52_211_153/16%)]" />
-      )}
-
-      {layers.population && (
-        <>
-          <PopulationMarker className="left-[26%] top-[35%]" value="N=420" />
-          <PopulationMarker className="left-[43%] top-[63%]" value="N=137" />
-          <PopulationMarker className="left-[66%] top-[56%]" value="N=286" />
-          <PopulationMarker className="left-[77%] top-[36%]" value="N=94" />
-        </>
-      )}
-
-      {layers.towers && (
-        <div className="map-marker absolute left-[70%] top-[28%] flex -translate-x-1/2 -translate-y-full flex-col items-center">
-          <div className="mb-2 whitespace-nowrap rounded-lg border border-emerald-300/35 bg-[#07131d]/90 px-3 py-2 shadow-xl backdrop-blur-md">
-            <div className="flex items-center gap-2 text-sm font-semibold text-white">
-              <RadioTower className="size-4 text-emerald-300" />
-              Kg. Merbok
-            </div>
-            <div className="mt-0.5 pl-6 text-xs text-slate-300">Elevation: 65m</div>
-          </div>
-          <div className="grid size-9 place-items-center rounded-full border-2 border-white bg-emerald-400 text-emerald-950 shadow-[0_0_0_7px_rgb(52_211_153/18%)]">
-            <RadioTower className="size-4" />
-          </div>
-          <div className="h-8 w-px bg-gradient-to-b from-white/80 to-transparent" />
-        </div>
-      )}
-    </div>
-  );
-}
-
-function TerrainStage({ layers }: { layers: Record<LayerKey, boolean> }) {
-  return (
-    <section aria-label="3D terrain map of Yan and Gunung Jerai" className="absolute inset-0 overflow-hidden bg-[#173b31]">
-      {mapboxToken ? (
-        <Suspense fallback={<TerrainFallback />}>
-          <LiveTerrainMap token={mapboxToken} />
-        </Suspense>
-      ) : (
-        <TerrainFallback />
-      )}
-      <MapOverlays layers={layers} />
+    <section
+      aria-label="Interactive 3D terrain model of Yan and Gunung Jerai"
+      className="absolute inset-0 overflow-hidden bg-[#173b31]"
+    >
+      <Suspense fallback={<TerrainFallback />}>
+        <Terrain3D
+          layers={layers}
+          timeline={timeline}
+          resetSignal={resetSignal}
+        />
+      </Suspense>
       <div className="map-vignette pointer-events-none absolute inset-0" />
+      <p className="pointer-events-none absolute bottom-1 right-3 z-20 hidden text-[10px] leading-4 text-white/45 lg:block">
+        Elevation NASA SRTM · Imagery Sentinel-2 cloudless by EOX (CC BY 4.0,
+        ESA Copernicus) · Roads © OpenStreetMap contributors (ODbL)
+      </p>
       <div className="pointer-events-none absolute bottom-5 left-20 hidden items-center gap-2 text-[11px] font-medium tracking-[0.06em] text-white/60 uppercase md:flex">
         <LocateFixed className="size-3.5" />
         5.792° N, 100.402° E
         <span className="h-3 w-px bg-white/20" />
-        Terrain view · 1.45× elevation
+        Drag to orbit · scroll to zoom
       </div>
     </section>
   );
@@ -333,12 +335,19 @@ function LayerPanel({
       </div>
       <div className="glass-panel mt-2 overflow-hidden rounded-xl p-2">
         <div className="flex items-center justify-between px-2 pb-2 pt-1">
-          <span className="text-xs font-semibold tracking-[0.12em] text-slate-400 uppercase">Map layers</span>
-          <span className="text-[11px] text-sky-300">{Object.values(layers).filter(Boolean).length} active</span>
+          <span className="text-xs font-semibold tracking-[0.12em] text-slate-400 uppercase">
+            Map layers
+          </span>
+          <span className="text-[11px] text-sky-300">
+            {Object.values(layers).filter(Boolean).length} active
+          </span>
         </div>
         <div className="space-y-0.5">
           {layerOptions.map(({ key, label, icon: Icon }) => (
-            <label key={key} className="flex min-h-11 cursor-pointer items-center gap-3 rounded-lg px-2.5 text-sm text-slate-200 transition-colors hover:bg-slate-700/45">
+            <label
+              key={key}
+              className="flex min-h-11 cursor-pointer items-center gap-3 rounded-lg px-2.5 text-sm text-slate-200 transition-colors hover:bg-slate-700/45"
+            >
               <Icon className="size-4 shrink-0 text-slate-400" aria-hidden />
               <span className="flex-1">{label}</span>
               <Switch
@@ -359,8 +368,13 @@ function LayerPanel({
             <RadioTower className="size-4" aria-hidden />
           </span>
           <span className="flex-1">New Portable Tower</span>
-          <span className="rounded-md border border-sky-300/20 bg-sky-400/10 px-1.5 py-1 text-[10px] font-bold tracking-[0.09em] text-sky-200 uppercase">Place</span>
-          <MousePointer2 className="absolute -bottom-2 -right-1 size-5 fill-slate-950 text-white drop-shadow-lg transition-transform group-hover:-translate-x-1 group-hover:-translate-y-1" aria-hidden />
+          <span className="rounded-md border border-sky-300/20 bg-sky-400/10 px-1.5 py-1 text-[10px] font-bold tracking-[0.09em] text-sky-200 uppercase">
+            Place
+          </span>
+          <MousePointer2
+            className="absolute -bottom-2 -right-1 size-5 fill-slate-950 text-white drop-shadow-lg transition-transform group-hover:-translate-x-1 group-hover:-translate-y-1"
+            aria-hidden
+          />
         </button>
       </div>
     </aside>
@@ -384,12 +398,18 @@ function TimelinePanel({
     <aside className="glass-panel absolute bottom-6 left-16 z-30 hidden w-[min(520px,calc(100vw-470px))] min-w-[360px] rounded-xl p-4 md:block">
       <div className="flex items-center justify-between gap-3">
         <div>
-          <p className="text-xs font-semibold tracking-[0.1em] text-slate-400 uppercase">HAND</p>
-          <h2 className="mt-0.5 text-sm font-medium text-slate-100">Height Above Nearest Drainage</h2>
+          <p className="text-xs font-semibold tracking-[0.1em] text-slate-400 uppercase">
+            HAND
+          </p>
+          <h2 className="mt-0.5 text-sm font-medium text-slate-100">
+            Height Above Nearest Drainage
+          </h2>
         </div>
-        <div className="flex items-center gap-2 text-[11px] text-slate-400"><CloudRain className="size-3.5 text-sky-300" /> Modelled flood depth</div>
+        <div className="flex items-center gap-2 text-[11px] text-slate-400">
+          <CloudRain className="size-3.5 text-sky-300" /> Modelled flood depth
+        </div>
       </div>
-      <div className="mt-3 h-2 rounded-full border border-white/10 bg-gradient-to-r from-[#075985] via-[#0ea5e9] to-[#a5f3fc] shadow-[0_0_18px_rgb(14_165_233/22%)]" />
+      <div className="mt-3 h-2 rounded-full border border-white/10 bg-gradient-to-r from-[#a7dff5] via-[#0ea5e9] to-[#0a4a87] shadow-[0_0_18px_rgb(14_165_233/22%)]" />
       <div className="mt-1.5 flex justify-between text-[11px] text-slate-400">
         <span>Shallow (&lt;0.3m)</span>
         <span>Deep (&gt;1.5m)</span>
@@ -402,13 +422,23 @@ function TimelinePanel({
           className="size-9 rounded-lg bg-sky-400 text-slate-950 hover:bg-sky-300"
           aria-label={playing ? 'Pause timeline' : 'Play timeline'}
         >
-          {playing ? <Pause className="size-4 fill-current" /> : <Play className="size-4 fill-current" />}
+          {playing ? (
+            <Pause className="size-4 fill-current" />
+          ) : (
+            <Play className="size-4 fill-current" />
+          )}
         </Button>
-        <span className="text-xs font-semibold tabular-nums text-slate-300">H08</span>
+        <span className="text-xs font-semibold tabular-nums text-slate-300">
+          H08
+        </span>
         <div className="relative flex-1 pt-5">
           <output
             className="absolute left-[var(--timeline-position)] top-0 -translate-x-1/2 rounded bg-white px-1.5 py-0.5 text-[10px] font-bold text-slate-900 shadow-lg"
-            style={{ '--timeline-position': `${(timeline / 16) * 100}%` } as CSSProperties}
+            style={
+              {
+                '--timeline-position': `${(timeline / 16) * 100}%`,
+              } as CSSProperties
+            }
           >
             {hour}
           </output>
@@ -424,7 +454,9 @@ function TimelinePanel({
             className="[&_[data-slot=slider-range]]:bg-sky-400 [&_[data-slot=slider-thumb]]:size-3.5 [&_[data-slot=slider-thumb]]:border-white [&_[data-slot=slider-thumb]]:bg-sky-400 [&_[data-slot=slider-track]]:h-1 [&_[data-slot=slider-track]]:bg-slate-600"
           />
         </div>
-        <span className="text-xs font-semibold tabular-nums text-slate-300">H08</span>
+        <span className="text-xs font-semibold tabular-nums text-slate-300">
+          H08
+        </span>
       </div>
     </aside>
   );
@@ -440,21 +472,36 @@ function CoverageVisual() {
         <RadioTower className="size-8" />
       </div>
       <div className="absolute left-3 top-3 flex items-center gap-2 rounded-md border border-emerald-300/20 bg-emerald-300/8 px-2 py-1 text-[10px] font-semibold tracking-[0.1em] text-emerald-200 uppercase">
-        <span className="size-1.5 rounded-full bg-emerald-300" /> LOS service area
+        <span className="size-1.5 rounded-full bg-emerald-300" /> LOS service
+        area
       </div>
-      <div className="absolute bottom-2 right-2 text-[10px] text-slate-500">VISUAL ESTIMATE</div>
+      <div className="absolute bottom-2 right-2 text-[10px] text-slate-500">
+        VISUAL ESTIMATE
+      </div>
     </div>
   );
 }
 
-function MetricCard({ icon: Icon, label, value }: { icon: IconComponent; label: string; value: string }) {
+function MetricCard({
+  icon: Icon,
+  label,
+  value,
+}: {
+  icon: IconComponent;
+  label: string;
+  value: string;
+}) {
   return (
     <div className="rounded-xl border border-slate-600/30 bg-slate-900/35 p-3">
       <div className="flex items-center gap-1.5 text-slate-500">
         <Icon className="size-3.5" aria-hidden />
-        <p className="text-[10px] font-semibold tracking-[0.1em] uppercase">{label}</p>
+        <p className="text-[10px] font-semibold tracking-[0.1em] uppercase">
+          {label}
+        </p>
       </div>
-      <p className="mt-2 text-sm font-semibold text-slate-100 tabular-nums">{value}</p>
+      <p className="mt-2 text-sm font-semibold text-slate-100 tabular-nums">
+        {value}
+      </p>
     </div>
   );
 }
@@ -467,11 +514,22 @@ function InterventionContent({ onClose }: { onClose?: () => void }) {
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex items-center justify-between border-b border-slate-600/35 px-4 py-3.5">
         <div>
-          <p className="text-[11px] font-semibold tracking-[0.12em] text-sky-300 uppercase">Candidate 04</p>
-          <h2 className="mt-0.5 text-base font-semibold text-white">Intervention Analysis</h2>
+          <p className="text-[11px] font-semibold tracking-[0.12em] text-sky-300 uppercase">
+            Candidate 04
+          </p>
+          <h2 className="mt-0.5 text-base font-semibold text-white">
+            Intervention Analysis
+          </h2>
         </div>
         {onClose && (
-          <Button type="button" variant="ghost" size="icon-lg" onClick={onClose} aria-label="Close intervention analysis" className="text-slate-400 hover:bg-slate-700/60 hover:text-white">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-lg"
+            onClick={onClose}
+            aria-label="Close intervention analysis"
+            className="text-slate-400 hover:bg-slate-700/60 hover:text-white"
+          >
             <X className="size-4" />
           </Button>
         )}
@@ -481,32 +539,71 @@ function InterventionContent({ onClose }: { onClose?: () => void }) {
         <div className="grid grid-cols-2 gap-2">
           <div className="col-span-2 rounded-xl border border-emerald-300/20 bg-emerald-300/8 p-3.5">
             <div className="flex items-center justify-between">
-              <p className="text-[11px] font-semibold tracking-[0.12em] text-emerald-200/75 uppercase">Reconnected population</p>
+              <p className="text-[11px] font-semibold tracking-[0.12em] text-emerald-200/75 uppercase">
+                Reconnected population
+              </p>
               <Users className="size-4 text-emerald-300" aria-hidden />
             </div>
-            <div className="mt-1 text-[34px] font-semibold leading-none tracking-[-0.04em] text-emerald-300 tabular-nums">+13,369</div>
-            <p className="mt-1.5 text-xs text-emerald-100/55">Across 12 priority communities</p>
+            <div className="mt-1 text-[34px] font-semibold leading-none tracking-[-0.04em] text-emerald-300 tabular-nums">
+              +13,369
+            </div>
+            <p className="mt-1.5 text-xs text-emerald-100/55">
+              Across 12 priority communities
+            </p>
           </div>
-          <MetricCard icon={Waves} label="Site flood depth" value="Dry (0.0m)" />
-          <MetricCard icon={CircleDollarSign} label="Est. cost" value="RM 45,000" />
+          <MetricCard
+            icon={Waves}
+            label="Site flood depth"
+            value="Dry (0.0m)"
+          />
+          <MetricCard
+            icon={CircleDollarSign}
+            label="Est. cost"
+            value="RM 45,000"
+          />
         </div>
 
         <CoverageVisual />
 
         <section className="mt-5">
           <div className="mb-2.5 flex items-center justify-between">
-            <h3 className="text-xs font-semibold tracking-[0.12em] text-slate-300 uppercase">Decision council</h3>
-            <span className="rounded-md border border-slate-600/40 bg-slate-800/60 px-1.5 py-1 text-[10px] text-slate-400">4 lenses</span>
+            <h3 className="text-xs font-semibold tracking-[0.12em] text-slate-300 uppercase">
+              Decision council
+            </h3>
+            <span className="rounded-md border border-slate-600/40 bg-slate-800/60 px-1.5 py-1 text-[10px] text-slate-400">
+              4 lenses
+            </span>
           </div>
-          <RadioGroup value={council} onValueChange={setCouncil} aria-label="Decision council weighting" className="gap-1.5">
+          <RadioGroup
+            value={council}
+            onValueChange={setCouncil}
+            aria-label="Decision council weighting"
+            className="gap-1.5"
+          >
             {councilOptions.map(([name, description], index) => (
-              <label htmlFor={`council-${index}`} key={name} className={`flex min-h-12 cursor-pointer items-center gap-3 rounded-lg border px-3 transition-colors ${council === name ? 'border-sky-300/25 bg-sky-300/8' : 'border-slate-600/25 bg-slate-900/20 hover:bg-slate-700/30'}`}>
-                <RadioGroupItem id={`council-${index}`} value={name} className="border-slate-500 data-checked:border-sky-300 data-checked:bg-sky-400" />
+              <label
+                htmlFor={`council-${index}`}
+                key={name}
+                className={`flex min-h-12 cursor-pointer items-center gap-3 rounded-lg border px-3 transition-colors ${council === name ? 'border-sky-300/25 bg-sky-300/8' : 'border-slate-600/25 bg-slate-900/20 hover:bg-slate-700/30'}`}
+              >
+                <RadioGroupItem
+                  id={`council-${index}`}
+                  value={name}
+                  className="border-slate-500 data-checked:border-sky-300 data-checked:bg-sky-400"
+                />
                 <span className="min-w-0 flex-1">
-                  <span className="block text-sm font-medium text-slate-100">{name}</span>
-                  <span className="block text-[11px] text-slate-500">{description}</span>
+                  <span className="block text-sm font-medium text-slate-100">
+                    {name}
+                  </span>
+                  <span className="block text-[11px] text-slate-500">
+                    {description}
+                  </span>
                 </span>
-                <span title={`${name}: ${description}`} className="grid size-7 place-items-center text-slate-500" aria-label={`About ${name}`}>
+                <span
+                  title={`${name}: ${description}`}
+                  className="grid size-7 place-items-center text-slate-500"
+                  aria-label={`About ${name}`}
+                >
                   <Info className="size-3.5" aria-hidden />
                 </span>
               </label>
@@ -517,35 +614,71 @@ function InterventionContent({ onClose }: { onClose?: () => void }) {
         <section className="mt-5 rounded-xl border border-slate-600/30 bg-slate-900/35 p-3.5">
           <div className="flex items-center gap-2">
             <ShieldCheck className="size-4 text-sky-300" aria-hidden />
-            <h3 className="text-xs font-semibold tracking-[0.12em] text-slate-300 uppercase">Oversight log</h3>
+            <h3 className="text-xs font-semibold tracking-[0.12em] text-slate-300 uppercase">
+              Oversight log
+            </h3>
           </div>
           <p className="mt-2 text-[13px] leading-5 text-slate-400">
-            Final placement remains with the response officer. This concept records no decision and submits no operational data.
+            Final placement remains with the response officer. This concept
+            records no decision and submits no operational data.
           </p>
         </section>
       </div>
 
       <div className="border-t border-slate-600/35 bg-slate-950/25 p-3">
         {decision && (
-          <p className="mb-2 flex items-center gap-2 rounded-lg border border-slate-600/30 bg-slate-800/55 px-2.5 py-2 text-xs text-slate-300" aria-live="polite">
+          <p
+            className="mb-2 flex items-center gap-2 rounded-lg border border-slate-600/30 bg-slate-800/55 px-2.5 py-2 text-xs text-slate-300"
+            aria-live="polite"
+          >
             <Check className="size-3.5 text-sky-300" aria-hidden />
             Preview marked: {decision}. Nothing was submitted.
           </p>
         )}
         <div className="grid grid-cols-3 gap-2">
-          <button type="button" onClick={() => setDecision('Accepted')} className="min-h-10 rounded-lg bg-emerald-500 px-2 text-xs font-bold tracking-[0.04em] text-white transition-colors hover:bg-emerald-400">ACCEPT</button>
-          <button type="button" onClick={() => setDecision('Modify')} className="min-h-10 rounded-lg border border-slate-500/45 bg-slate-700/75 px-2 text-xs font-bold tracking-[0.04em] text-white transition-colors hover:bg-slate-600">MODIFY</button>
-          <button type="button" onClick={() => setDecision('Rejected')} className="min-h-10 rounded-lg bg-red-500 px-2 text-xs font-bold tracking-[0.04em] text-white transition-colors hover:bg-red-400">REJECT</button>
+          <button
+            type="button"
+            onClick={() => setDecision('Accepted')}
+            className="min-h-10 rounded-lg bg-emerald-500 px-2 text-xs font-bold tracking-[0.04em] text-white transition-colors hover:bg-emerald-400"
+          >
+            ACCEPT
+          </button>
+          <button
+            type="button"
+            onClick={() => setDecision('Modify')}
+            className="min-h-10 rounded-lg border border-slate-500/45 bg-slate-700/75 px-2 text-xs font-bold tracking-[0.04em] text-white transition-colors hover:bg-slate-600"
+          >
+            MODIFY
+          </button>
+          <button
+            type="button"
+            onClick={() => setDecision('Rejected')}
+            className="min-h-10 rounded-lg bg-red-500 px-2 text-xs font-bold tracking-[0.04em] text-white transition-colors hover:bg-red-400"
+          >
+            REJECT
+          </button>
         </div>
       </div>
     </div>
   );
 }
 
-function InterventionPanel({ open, onClose, onOpen }: { open: boolean; onClose: () => void; onOpen: () => void }) {
+function InterventionPanel({
+  open,
+  onClose,
+  onOpen,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onOpen: () => void;
+}) {
   if (!open) {
     return (
-      <button type="button" onClick={onOpen} className="glass-panel absolute right-6 top-20 z-30 hidden min-h-11 items-center gap-2 rounded-xl px-3.5 text-sm font-medium text-white hover:border-sky-300/35 md:flex">
+      <button
+        type="button"
+        onClick={onOpen}
+        className="glass-panel absolute right-6 top-20 z-30 hidden min-h-11 items-center gap-2 rounded-xl px-3.5 text-sm font-medium text-white hover:border-sky-300/35 md:flex"
+      >
         <ShieldCheck className="size-4 text-sky-300" aria-hidden />
         Open analysis
       </button>
@@ -571,21 +704,42 @@ function MobileControls({
   return (
     <aside className="absolute inset-x-3 top-[68px] z-30 md:hidden">
       <div className="glass-panel overflow-hidden rounded-xl">
-        <button type="button" onClick={() => setExpanded(!expanded)} aria-expanded={expanded} className="flex min-h-12 w-full items-center gap-2 px-3 text-left">
+        <button
+          type="button"
+          onClick={() => setExpanded(!expanded)}
+          aria-expanded={expanded}
+          className="flex min-h-12 w-full items-center gap-2 px-3 text-left"
+        >
           <MapPin className="size-4 shrink-0 text-sky-300" aria-hidden />
-          <span className="min-w-0 flex-1 truncate text-sm font-medium text-white">Yan · Gunung Jerai, Kedah</span>
-          <span className="rounded border border-amber-300/20 bg-amber-300/8 px-1.5 py-1 text-[9px] font-bold tracking-[0.08em] text-amber-200 uppercase">Concept</span>
-          <ChevronDown className={`size-4 text-slate-400 transition-transform ${expanded ? 'rotate-180' : ''}`} aria-hidden />
+          <span className="min-w-0 flex-1 truncate text-sm font-medium text-white">
+            Yan · Gunung Jerai, Kedah
+          </span>
+          <span className="rounded border border-amber-300/20 bg-amber-300/8 px-1.5 py-1 text-[9px] font-bold tracking-[0.08em] text-amber-200 uppercase">
+            Concept
+          </span>
+          <ChevronDown
+            className={`size-4 text-slate-400 transition-transform ${expanded ? 'rotate-180' : ''}`}
+            aria-hidden
+          />
         </button>
         {expanded && (
           <div className="grid grid-cols-2 gap-1 border-t border-slate-600/30 p-2">
             {layerOptions.map(({ key, label, icon: Icon }) => (
-              <button key={key} type="button" onClick={() => onLayerChange(key, !layers[key])} aria-pressed={layers[key]} className={`flex min-h-11 items-center gap-2 rounded-lg px-2 text-left text-[11px] ${layers[key] ? 'bg-sky-400/12 text-sky-100' : 'bg-slate-900/30 text-slate-400'}`}>
+              <button
+                key={key}
+                type="button"
+                onClick={() => onLayerChange(key, !layers[key])}
+                aria-pressed={layers[key]}
+                className={`flex min-h-11 items-center gap-2 rounded-lg px-2 text-left text-[11px] ${layers[key] ? 'bg-sky-400/12 text-sky-100' : 'bg-slate-900/30 text-slate-400'}`}
+              >
                 <Icon className="size-3.5 shrink-0" aria-hidden />
                 {label}
               </button>
             ))}
-            <button type="button" className="flex min-h-11 items-center gap-2 rounded-lg bg-emerald-400/12 px-2 text-left text-[11px] font-semibold text-emerald-200">
+            <button
+              type="button"
+              className="flex min-h-11 items-center gap-2 rounded-lg bg-emerald-400/12 px-2 text-left text-[11px] font-semibold text-emerald-200"
+            >
               <RadioTower className="size-3.5" aria-hidden /> New Portable Tower
             </button>
           </div>
@@ -595,23 +749,53 @@ function MobileControls({
   );
 }
 
-function MobileTimeline({ timeline, setTimeline }: { timeline: number; setTimeline: (value: number) => void }) {
+function MobileTimeline({
+  timeline,
+  setTimeline,
+}: {
+  timeline: number;
+  setTimeline: (value: number) => void;
+}) {
   return (
     <div className="glass-panel absolute inset-x-3 bottom-[72px] z-30 rounded-xl px-3 py-2.5 md:hidden">
       <div className="flex items-center gap-3">
-        <span className="text-[10px] font-bold tracking-[0.08em] text-sky-200 uppercase">HAND</span>
-        <Slider value={[timeline]} min={0} max={16} step={2} onValueChange={(value) => setTimeline(typeof value === 'number' ? value : (value[0] ?? 8))} aria-label="Scenario hour" className="flex-1 [&_[data-slot=slider-range]]:bg-sky-400 [&_[data-slot=slider-thumb]]:border-white [&_[data-slot=slider-thumb]]:bg-sky-400 [&_[data-slot=slider-track]]:bg-slate-600" />
-        <span className="w-8 text-right text-xs font-semibold tabular-nums text-white">H{String(timeline).padStart(2, '0')}</span>
+        <span className="text-[10px] font-bold tracking-[0.08em] text-sky-200 uppercase">
+          HAND
+        </span>
+        <Slider
+          value={[timeline]}
+          min={0}
+          max={16}
+          step={2}
+          onValueChange={(value) =>
+            setTimeline(typeof value === 'number' ? value : (value[0] ?? 8))
+          }
+          aria-label="Scenario hour"
+          className="flex-1 [&_[data-slot=slider-range]]:bg-sky-400 [&_[data-slot=slider-thumb]]:border-white [&_[data-slot=slider-thumb]]:bg-sky-400 [&_[data-slot=slider-track]]:bg-slate-600"
+        />
+        <span className="w-8 text-right text-xs font-semibold tabular-nums text-white">
+          H{String(timeline).padStart(2, '0')}
+        </span>
       </div>
     </div>
   );
 }
 
-function MobileAnalysis({ open, onClose }: { open: boolean; onClose: () => void }) {
+function MobileAnalysis({
+  open,
+  onClose,
+}: {
+  open: boolean;
+  onClose: () => void;
+}) {
   if (!open) return null;
 
   return (
-    <dialog open className="fixed inset-0 z-[60] m-0 flex size-full max-h-none max-w-none items-end border-0 bg-black/40 p-0 backdrop-blur-[2px] md:hidden" aria-label="Intervention analysis">
+    <dialog
+      open
+      className="fixed inset-0 z-[60] m-0 flex size-full max-h-none max-w-none items-end border-0 bg-black/40 p-0 backdrop-blur-[2px] md:hidden"
+      aria-label="Intervention analysis"
+    >
       <div className="glass-panel flex max-h-[84dvh] w-full flex-col overflow-hidden rounded-t-2xl border-x-0 border-b-0">
         <div className="mx-auto mt-2 h-1 w-10 rounded-full bg-slate-600" />
         <InterventionContent onClose={onClose} />
@@ -631,6 +815,7 @@ export function ResilinetDashboard() {
   const [timeline, setTimeline] = useState(8);
   const [playing, setPlaying] = useState(false);
   const [analysisOpen, setAnalysisOpen] = useState(true);
+  const [resetSignal, setResetSignal] = useState(0);
   const [mobileAnalysisOpen, setMobileAnalysisOpen] = useState(false);
 
   const onLayerChange = (key: LayerKey, value: boolean) => {
@@ -639,26 +824,46 @@ export function ResilinetDashboard() {
 
   return (
     <main className="relative h-[100dvh] w-screen overflow-hidden bg-slate-900 text-slate-100">
-      <TerrainStage layers={layers} />
+      <TerrainStage
+        layers={layers}
+        timeline={timeline}
+        resetSignal={resetSignal}
+      />
       <TopBar />
       <UtilityRail />
       <LayerPanel layers={layers} onLayerChange={onLayerChange} />
-      <TimelinePanel timeline={timeline} setTimeline={setTimeline} playing={playing} setPlaying={setPlaying} />
-      <InterventionPanel open={analysisOpen} onClose={() => setAnalysisOpen(false)} onOpen={() => setAnalysisOpen(true)} />
+      <TimelinePanel
+        timeline={timeline}
+        setTimeline={setTimeline}
+        playing={playing}
+        setPlaying={setPlaying}
+      />
+      <InterventionPanel
+        open={analysisOpen}
+        onClose={() => setAnalysisOpen(false)}
+        onOpen={() => setAnalysisOpen(true)}
+      />
       <MobileControls layers={layers} onLayerChange={onLayerChange} />
       <MobileTimeline timeline={timeline} setTimeline={setTimeline} />
       <MobileDock onOpenAnalysis={() => setMobileAnalysisOpen(true)} />
-      <MobileAnalysis open={mobileAnalysisOpen} onClose={() => setMobileAnalysisOpen(false)} />
+      <MobileAnalysis
+        open={mobileAnalysisOpen}
+        onClose={() => setMobileAnalysisOpen(false)}
+      />
 
-      <div className="absolute bottom-24 right-4 z-20 hidden items-center gap-1.5 rounded-lg border border-red-300/20 bg-red-950/70 px-2.5 py-2 text-[11px] font-medium text-red-100 backdrop-blur-md lg:flex">
-        <TriangleAlert className="size-3.5 text-red-300" aria-hidden />
-        Road segment severed at H08
-      </div>
       <div className="absolute right-[362px] top-20 z-20 hidden rounded-lg border border-white/15 bg-slate-950/55 px-2.5 py-2 text-[11px] text-slate-200 backdrop-blur-md xl:flex">
-        <Satellite className="mr-1.5 inline size-3.5 text-sky-300" aria-hidden />
-        Stylized terrain view
+        <Satellite
+          className="mr-1.5 inline size-3.5 text-sky-300"
+          aria-hidden
+        />
+        NASA SRTM · Sentinel-2
       </div>
-      <button type="button" aria-label="Reset map view" className="absolute bottom-6 right-[362px] z-20 hidden size-10 place-items-center rounded-xl border border-white/15 bg-slate-950/65 text-slate-300 backdrop-blur-md hover:bg-slate-800 hover:text-white xl:grid">
+      <button
+        type="button"
+        aria-label="Reset map view"
+        onClick={() => setResetSignal((value) => value + 1)}
+        className="absolute bottom-6 right-[362px] z-20 hidden size-10 place-items-center rounded-xl border border-white/15 bg-slate-950/65 text-slate-300 backdrop-blur-md hover:bg-slate-800 hover:text-white xl:grid"
+      >
         <RotateCcw className="size-4" aria-hidden />
       </button>
       <div className="pointer-events-none absolute inset-x-0 top-14 z-20 h-px bg-gradient-to-r from-transparent via-sky-300/25 to-transparent" />
