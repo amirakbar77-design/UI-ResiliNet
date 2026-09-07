@@ -32,7 +32,7 @@ const SRTM_SPAN = 3601; // 1 arc-second samples per degree tile, inclusive edge
 const IMAGERY_ZOOM = 14;
 const TEXTURE_SIZE = 2048;
 const MESH_STEP = 2; // downsample factor from the 30 m analysis grid
-const DRAINAGE_CELLS = 150; // upstream cells before a cell counts as drainage
+const DRAINAGE_CELLS = 700; // upstream cells (~0.6 km²) before a cell counts as drainage
 const HAND_CAP_DM = 254; // 25.4 m, well above any modelled flood level
 
 const CACHE = path.resolve('.cache');
@@ -346,7 +346,7 @@ async function bakeImagery() {
     .resize(TEXTURE_SIZE, TEXTURE_SIZE, { fit: 'fill' })
     // Tropical canopy reads almost black straight off Sentinel-2; lift it so
     // the drape holds detail once the scene's own lighting is applied.
-    .modulate({ brightness: 1.22, saturation: 1.28 })
+    .modulate({ brightness: 1.38, saturation: 1.3 })
     .linear(1.06, -6)
     .jpeg({ quality: 82, mozjpeg: true })
     .toFile(path.join(OUT, 'surface.jpg'));

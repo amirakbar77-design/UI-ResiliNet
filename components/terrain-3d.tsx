@@ -119,6 +119,7 @@ function createScene(
   anchors: Anchor[],
   markerElements: Map<string, HTMLDivElement>,
   status: StatusElements,
+  initialHour: number,
 ): SceneHandle {
   const { meta, elevation, hand, width, height } = terrain;
   const g = sceneGrid(meta);
@@ -175,7 +176,7 @@ function createScene(
 
   // The Sentinel-2 drape already carries its own illumination, so the scene
   // lights mostly lift it and add just enough directional shaping for relief.
-  scene.add(new THREE.AmbientLight(0xffffff, 0.95));
+  scene.add(new THREE.AmbientLight(0xffffff, 1.1));
   scene.add(new THREE.HemisphereLight(0xcfe4f3, 0x3b4433, 0.45));
   const sun = new THREE.DirectionalLight(0xfff4e4, 0.85);
   sun.position.set(-400, 520, 260);
@@ -296,8 +297,8 @@ function createScene(
   };
 
   // --- Flood surface from the baked HAND raster --------------------------
-  const shallowTint = new THREE.Color('#bfeafc');
-  const deepTint = new THREE.Color('#0d5fa8');
+  const shallowTint = new THREE.Color('#8fd8f5');
+  const deepTint = new THREE.Color('#0a4f92');
   const floodGeometry = new THREE.BufferGeometry();
   const floodMesh = new THREE.Mesh(
     floodGeometry,
@@ -327,6 +328,9 @@ function createScene(
     const level = floodLevelForHour(hour);
     floodIndexMap.fill(-1);
     let wetCells = 0;
+    for (let index = 0; index < vertexCount; index += 1) {
+      if (wetAt(index, level)) wetCells += 1;
+    }
     const waterPositions: number[] = [];
     const waterColors: number[] = [];
     const waterIndices: number[] = [];
@@ -352,7 +356,7 @@ function createScene(
         waterColor.r,
         waterColor.g,
         waterColor.b,
-        depth > 0 ? clamp(0.34 + depth * 0.26, 0.34, 0.9) : 0,
+        depth > 0 ? clamp(0.55 + depth * 0.18, 0.55, 0.94) : 0,
       );
       const next = waterPositions.length / 3 - 1;
       floodIndexMap[index] = next;
@@ -373,7 +377,6 @@ function createScene(
         ) {
           continue;
         }
-        wetCells += 1;
         const va = pushVertex(a);
         const vb = pushVertex(b);
         const vc = pushVertex(c);
@@ -402,7 +405,7 @@ function createScene(
 
   const intactColor = new THREE.Color('#eef4f8');
   const severedColor = new THREE.Color('#fb4a45');
-  const roadSegments: { hand: number; start: number }[] = [];
+  const roadSegments: { hand: number; start: number; km: number }[] = [];
   const roadVertices: number[] = [];
   const roadColors: number[] = [];
   const roadIndices: number[] = [];
@@ -440,6 +443,7 @@ function createScene(
       roadSegments.push({
         hand: Math.min(handAt(lon0, lat0), handAt(lon1, lat1)),
         start: base,
+        km: start.distanceTo(end) / SCENE_SCALE / 1000,
       });
     }
   }
@@ -464,15 +468,15 @@ function createScene(
   roadMesh.renderOrder = 2;
   roadGroup.add(roadMesh);
 
-  let severedCount = 0;
+  let severedKm = 0;
 
   const paintRoads = (hour: number) => {
     const level = floodLevelForHour(hour);
     const array = roadColorAttribute.array as Float32Array;
-    severedCount = 0;
+    severedKm = 0;
     for (const segment of roadSegments) {
       const severed = segment.hand !== HAND_DRY && segment.hand / 10 < level;
-      if (severed) severedCount += 1;
+      if (severed) severedKm += segment.km;
       const tint = severed ? severedColor : intactColor;
       const alpha = severed ? 0.95 : 0.42;
       for (let corner = 0; corner < 4; corner += 1) {
@@ -588,14 +592,44 @@ function createScene(
   };
 
   buildCoverage();
-  buildFlood(8);
-  paintRoads(8);
+  buildFlood(initialHour);
+  paintRoads(initialHour);
+  if (status.severed) status.severed.textContent = severedKm.toFixed(1);
+  if (status.area) status.area.textContent = floodedKm2.toFixed(1);
 
   // --- Camera framing ----------------------------------------------------
   // Opens on the classic oblique: Gunung Jerai's massif to the north-east,
   // the Yan coastal plain and the Straits falling away to the west.
-  const homeTarget = new THREE.Vector3(10, 6, 10);
-  const homePosition = new THREE.Vector3(-180, 205, 250);
+  // Frame the ground between the tower candidate and the centre of mass of
+  // the modelled inundation, so the scene opens on the decision at hand
+  // rather than on an arbitrary corner of the tile.
+  const openingLevel = floodLevelForHour(initialHour);
+  let wetX = 0;
+  let wetZ = 0;
+  let wetCount = 0;
+  for (let index = 0; index < vertexCount; index += 1) {
+    if (!wetAt(index, openingLevel)) continue;
+    wetX += positions[index * 3]!;
+    wetZ += positions[index * 3 + 2]!;
+    wetCount += 1;
+  }
+  const focusX = wetCount > 0 ? wetX / wetCount : 0;
+  const focusZ = wetCount > 0 ? wetZ / wetCount : 0;
+  const homeTarget = new THREE.Vector3(
+    (focusX + towerBase.x) / 2,
+    elevationToWorldY(
+      elevationAt((focusX + towerBase.x) / 2, (focusZ + towerBase.z) / 2),
+    ),
+    (focusZ + towerBase.z) / 2,
+  );
+  const orbitDistance = Math.max(g.extentX, g.extentZ) * 0.48;
+  const homePosition = homeTarget
+    .clone()
+    .add(
+      new THREE.Vector3(-1.15, 0.66, 0.9)
+        .normalize()
+        .multiplyScalar(orbitDistance),
+    );
   camera.position.copy(homePosition);
   controls.target.copy(homeTarget);
   controls.update();
@@ -696,7 +730,7 @@ function createScene(
     setHour(hour) {
       buildFlood(hour);
       paintRoads(hour);
-      if (status.severed) status.severed.textContent = String(severedCount);
+      if (status.severed) status.severed.textContent = severedKm.toFixed(1);
       if (status.area) status.area.textContent = floodedKm2.toFixed(1);
     },
     resetView() {
@@ -750,6 +784,7 @@ export function Terrain3D({
   const severedRef = useRef<HTMLSpanElement>(null);
   const areaRef = useRef<HTMLSpanElement>(null);
   const sceneRef = useRef<SceneHandle | null>(null);
+  const timelineRef = useRef(timeline);
   const anchors = useMemo(
     () => (terrain ? deriveAnchors(terrain) : []),
     [terrain],
@@ -783,6 +818,7 @@ export function Terrain3D({
         severed: severedRef.current,
         area: areaRef.current,
       },
+      timelineRef.current,
     );
     sceneRef.current = handle;
     return () => {
@@ -791,13 +827,16 @@ export function Terrain3D({
     };
   }, [terrain, anchors]);
 
+  // The scene only exists once the terrain assets arrive, so these must
+  // re-run at that point as well as when the control changes.
   useEffect(() => {
     sceneRef.current?.setLayers(layers);
-  }, [layers]);
+  }, [layers, terrain]);
 
   useEffect(() => {
+    timelineRef.current = timeline;
     sceneRef.current?.setHour(timeline);
-  }, [timeline]);
+  }, [timeline, terrain]);
 
   useEffect(() => {
     if (resetSignal > 0) sceneRef.current?.resetView();
@@ -819,12 +858,12 @@ export function Terrain3D({
           {failed ? 'Terrain assets unavailable' : 'Loading terrain model…'}
         </p>
       )}
-      <div className="pointer-events-none absolute bottom-24 right-4 z-20 hidden items-center gap-1.5 rounded-lg border border-red-300/20 bg-red-950/70 px-2.5 py-2 text-[11px] font-medium text-red-100 backdrop-blur-md lg:flex">
+      <div className="pointer-events-none absolute top-[132px] right-6 z-20 hidden items-center gap-1.5 xl:right-[360px] rounded-lg border border-red-300/20 bg-red-950/70 px-2.5 py-2 text-[11px] font-medium text-red-100 backdrop-blur-md lg:flex">
         <TriangleAlert className="size-3.5 text-red-300" aria-hidden />
         <span ref={severedRef} className="tabular-nums">
           0
         </span>
-        road segments cut ·
+        km of road cut ·
         <span ref={areaRef} className="tabular-nums">
           0
         </span>

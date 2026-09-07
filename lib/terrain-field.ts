@@ -60,7 +60,7 @@ export type TerrainData = {
 /** World units per metre. One unit is 50 m, keeping the scene camera-sized. */
 export const SCENE_SCALE = 0.02;
 /** Relief exaggeration, in the same spirit as the concept's earlier DEM draft. */
-export const VERTICAL_EXAGGERATION = 1.9;
+export const VERTICAL_EXAGGERATION = 2.6;
 export const HAND_DRY = 255;
 
 export function clamp(value: number, min: number, max: number) {
@@ -152,25 +152,23 @@ async function loadBinary(url: string) {
 
 async function loadImageBitmap(url: string) {
   const response = await fetch(url);
-  if (!response.ok) throw new Error(`Failed to load ${url}: ${response.status}`);
+  if (!response.ok)
+    throw new Error(`Failed to load ${url}: ${response.status}`);
   return createImageBitmap(await response.blob());
 }
 
 export async function loadTerrain(base = '/terrain'): Promise<TerrainData> {
-  console.log('TRACE loadTerrain start');
   const metaResponse = await fetch(`${base}/terrain.json`);
   if (!metaResponse.ok) {
     throw new Error(`Failed to load terrain metadata: ${metaResponse.status}`);
   }
   const meta = (await metaResponse.json()) as TerrainMeta;
-  console.log('TRACE meta ok');
   const [elevationBuffer, handBuffer, surface] = await Promise.all([
     loadBinary(`${base}/elevation.bin`),
     loadBinary(`${base}/hand.bin`),
     loadImageBitmap(`${base}/${meta.texture.file}`),
   ]);
 
-  console.log('TRACE binaries ok');
   return {
     meta,
     elevation: new Int16Array(elevationBuffer),
