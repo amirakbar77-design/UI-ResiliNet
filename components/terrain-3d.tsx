@@ -13,6 +13,8 @@ import {
   type LayerKey,
   lonLatToWorld,
   mercatorUv,
+  metresPerDegreeLon,
+  type Place,
   SCENE_SCALE,
   sceneGrid,
   type TerrainData,
@@ -22,8 +24,19 @@ import {
 const COVERAGE_RADIUS_METRES = 9000;
 const TOWER_MAST_METRES = 32;
 const IDLE_DRIFT_DELAY = 4200;
-/** Illustrative population figures; the concept computes no census. */
-const MOCK_POPULATIONS = ['N=420', 'N=137', 'N=286', 'N=94'];
+const BASE_DAMPING = 0.07; // per 60 Hz frame; rescaled to the real frame time
+const GESTURE_TAIL_MS = 250;
+const WHEEL_ZOOM_RATE = 0.0008; // log-distance per wheel pixel (~8 % per 100 px)
+const SWIPE_ORBIT_RATE = 0.0035; // radians of azimuth per horizontal wheel pixel
+const SWIPE_FLY_RATE = 0.0025; // fraction of camera height per vertical wheel pixel
+const GESTURE_EASE_SECONDS = 0.12;
+const FRAME_SAMPLE = 40;
+const MAX_PLACE_MARKERS = 4;
+// Homes are drawn about three times their true footprint so a kampung still
+// reads as a cluster from the valley-wide opening view.
+const HOME_FOOTPRINT_METRES = 36;
+const HOME_HEIGHT_METRES = 9;
+const HOME_COUNT_RADIUS_METRES = 1200;
 
 type Anchor = {
   id: string;
@@ -38,6 +51,7 @@ type Anchor = {
 type StatusElements = {
   severed: HTMLElement | null;
   area: HTMLElement | null;
+  homes: HTMLElement | null;
 };
 
 type SceneHandle = {
@@ -52,9 +66,19 @@ type SceneHandle = {
  * 1.5 km, so the markers sit where the HAND raster says the risk is.
  */
 function deriveAnchors(terrain: TerrainData): Anchor[] {
-  const { meta, hand, width, height } = terrain;
+  const { meta, hand, houses, width, height } = terrain;
   const g = sceneGrid(meta);
   const radiusCells = Math.round(1500 / (g.lonStep * 111_320));
+  const homesNear = (place: Place) => {
+    const kx = metresPerDegreeLon(place.lat);
+    let count = 0;
+    for (let i = 0; i < houses.length; i += 3) {
+      const dx = (houses[i]! - place.lon) * kx;
+      const dy = (houses[i + 1]! - place.lat) * 110_574;
+      if (dx * dx + dy * dy < HOME_COUNT_RADIUS_METRES ** 2) count += 1;
+    }
+    return count;
+  };
 
   const scored = meta.places.map((place) => {
     const col = Math.round((place.lon - meta.aoi.west) / g.lonStep);
@@ -87,7 +111,7 @@ function deriveAnchors(terrain: TerrainData): Anchor[] {
 
   const chosen: typeof scored = [];
   for (const candidate of scored) {
-    if (chosen.length >= MOCK_POPULATIONS.length) break;
+    if (chosen.length >= MAX_PLACE_MARKERS) break;
     const tooClose = chosen.some(
       (other) =>
         Math.hypot(
@@ -103,7 +127,7 @@ function deriveAnchors(terrain: TerrainData): Anchor[] {
       id: `place-${entry.place.name}-${index}`,
       kind: 'population',
       label: entry.place.name,
-      detail: MOCK_POPULATIONS[index]!,
+      detail: `${homesNear(entry.place)} homes`,
       lon: entry.place.lon,
       lat: entry.place.lat,
       liftMetres: 60,
@@ -125,11 +149,13 @@ function createScene(
   const g = sceneGrid(meta);
   const vertexCount = width * height;
 
+  const deviceRatio = globalThis.devicePixelRatio || 1;
   const renderer = new THREE.WebGLRenderer({
-    antialias: true,
+    // MSAA buys little at Retina density and costs a lot on integrated GPUs.
+    antialias: deviceRatio < 1.5,
     powerPreference: 'high-performance',
   });
-  renderer.setPixelRatio(Math.min(globalThis.devicePixelRatio || 1, 2));
+  renderer.setPixelRatio(Math.min(deviceRatio, 1.5));
   renderer.setSize(container.clientWidth, container.clientHeight, false);
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.domElement.style.width = '100%';
@@ -166,12 +192,21 @@ function createScene(
 
   const controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
-  controls.dampingFactor = 0.07;
-  controls.enablePan = false;
+  controls.dampingFactor = BASE_DAMPING;
+  // Map conventions: drag pans across the ground, right- or shift-drag orbits.
+  controls.enablePan = true;
+  controls.screenSpacePanning = false;
+  controls.panSpeed = 0.8;
+  controls.mouseButtons = {
+    LEFT: THREE.MOUSE.PAN,
+    MIDDLE: THREE.MOUSE.DOLLY,
+    RIGHT: THREE.MOUSE.ROTATE,
+  };
+  controls.touches = { ONE: THREE.TOUCH.PAN, TWO: THREE.TOUCH.DOLLY_ROTATE };
   controls.minDistance = 45;
   controls.maxDistance = 700;
   controls.minPolarAngle = 0.2;
-  controls.maxPolarAngle = 1.36;
+  controls.maxPolarAngle = 1.45; // low enough to fly along the valley floor
   controls.autoRotateSpeed = 0.22;
 
   // The Sentinel-2 drape already carries its own illumination, so the scene
@@ -351,12 +386,12 @@ function createScene(
         elevationToWorldY(surface),
         positions[index * 3 + 2]!,
       );
-      waterColor.copy(shallowTint).lerp(deepTint, clamp(depth / 2.4, 0, 1));
+      waterColor.copy(shallowTint).lerp(deepTint, clamp(depth / 8, 0, 1));
       waterColors.push(
         waterColor.r,
         waterColor.g,
         waterColor.b,
-        depth > 0 ? clamp(0.55 + depth * 0.18, 0.55, 0.94) : 0,
+        depth > 0 ? clamp(0.55 + depth * 0.04, 0.55, 0.94) : 0,
       );
       const next = waterPositions.length / 3 - 1;
       floodIndexMap[index] = next;
@@ -404,15 +439,24 @@ function createScene(
   scene.add(roadGroup);
 
   const intactColor = new THREE.Color('#eef4f8');
+  // The railway reads as steel so it is not mistaken for another road.
+  const railColor = new THREE.Color('#b8c2cc');
   const severedColor = new THREE.Color('#fb4a45');
-  const roadSegments: { hand: number; start: number; km: number }[] = [];
+  const roadSegments: {
+    hand: number;
+    start: number;
+    km: number;
+    intact: THREE.Color;
+  }[] = [];
   const roadVertices: number[] = [];
   const roadColors: number[] = [];
   const roadIndices: number[] = [];
 
   for (const way of meta.roads) {
+    const rail = way.klass === 'rail';
     const major = way.klass === 'motorway' || way.klass === 'trunk';
-    const halfWidth = (major ? 34 : 24) * SCENE_SCALE;
+    const halfWidth = (rail ? 18 : major ? 34 : 24) * SCENE_SCALE;
+    const intact = rail ? railColor : intactColor;
     for (let i = 0; i < way.points.length - 1; i += 1) {
       const [lon0, lat0] = way.points[i]!;
       const [lon1, lat1] = way.points[i + 1]!;
@@ -437,13 +481,14 @@ function createScene(
           point.y,
           point.z + normal.y * side,
         );
-        roadColors.push(intactColor.r, intactColor.g, intactColor.b, 0.42);
+        roadColors.push(intact.r, intact.g, intact.b, 0.42);
       }
       roadIndices.push(base, base + 2, base + 1, base + 1, base + 2, base + 3);
       roadSegments.push({
         hand: Math.min(handAt(lon0, lat0), handAt(lon1, lat1)),
         start: base,
         km: start.distanceTo(end) / SCENE_SCALE / 1000,
+        intact,
       });
     }
   }
@@ -477,7 +522,7 @@ function createScene(
     for (const segment of roadSegments) {
       const severed = segment.hand !== HAND_DRY && segment.hand / 10 < level;
       if (severed) severedKm += segment.km;
-      const tint = severed ? severedColor : intactColor;
+      const tint = severed ? severedColor : segment.intact;
       const alpha = severed ? 0.95 : 0.42;
       for (let corner = 0; corner < 4; corner += 1) {
         const offset = (segment.start + corner) * 4;
@@ -488,6 +533,56 @@ function createScene(
       }
     }
     roadColorAttribute.needsUpdate = true;
+  };
+
+  // --- Homes, tinted by inundation ---------------------------------------
+  const houseGroup = new THREE.Group();
+  scene.add(houseGroup);
+  const houseCount = terrain.houses.length / 3;
+  const houseHeight = elevationToWorldY(HOME_HEIGHT_METRES);
+  const houseGeometry = new THREE.BoxGeometry(
+    HOME_FOOTPRINT_METRES * SCENE_SCALE,
+    houseHeight,
+    HOME_FOOTPRINT_METRES * 0.7 * SCENE_SCALE,
+  );
+  houseGeometry.translate(0, houseHeight / 2, 0);
+  const houseMesh = new THREE.InstancedMesh(
+    houseGeometry,
+    new THREE.MeshStandardMaterial({ roughness: 0.85, metalness: 0 }),
+    houseCount,
+  );
+  const houseHand = new Uint8Array(houseCount);
+  {
+    const matrix = new THREE.Matrix4();
+    const rotation = new THREE.Quaternion();
+    const unit = new THREE.Vector3(1, 1, 1);
+    const up = new THREE.Vector3(0, 1, 0);
+    for (let i = 0; i < houseCount; i += 1) {
+      const lon = terrain.houses[i * 3]!;
+      const lat = terrain.houses[i * 3 + 1]!;
+      rotation.setFromAxisAngle(up, terrain.houses[i * 3 + 2]!);
+      matrix.compose(worldOf(lon, lat, 1), rotation, unit);
+      houseMesh.setMatrixAt(i, matrix);
+      houseHand[i] = handAt(lon, lat);
+    }
+    houseMesh.instanceMatrix.needsUpdate = true;
+  }
+  houseMesh.renderOrder = 2;
+  houseGroup.add(houseMesh);
+
+  const homeColor = new THREE.Color('#f6eddc');
+  const floodedHomeColor = new THREE.Color('#fb4a45');
+  let homesFlooded = 0;
+
+  const paintHouses = (hour: number) => {
+    const level = floodLevelForHour(hour);
+    homesFlooded = 0;
+    for (let i = 0; i < houseCount; i += 1) {
+      const wet = houseHand[i] !== HAND_DRY && houseHand[i]! / 10 < level;
+      if (wet) homesFlooded += 1;
+      houseMesh.setColorAt(i, wet ? floodedHomeColor : homeColor);
+    }
+    if (houseMesh.instanceColor) houseMesh.instanceColor.needsUpdate = true;
   };
 
   // --- Tower and line-of-sight service area ------------------------------
@@ -555,7 +650,7 @@ function createScene(
           emerald.r,
           emerald.g,
           emerald.b,
-          visible ? 0.08 + 0.26 * falloff : 0,
+          visible ? 0.14 + 0.36 * falloff : 0,
         );
       }
     }
@@ -594,15 +689,18 @@ function createScene(
   buildCoverage();
   buildFlood(initialHour);
   paintRoads(initialHour);
+  paintHouses(initialHour);
   if (status.severed) status.severed.textContent = severedKm.toFixed(1);
   if (status.area) status.area.textContent = floodedKm2.toFixed(1);
+  if (status.homes) status.homes.textContent = String(homesFlooded);
 
   // --- Camera framing ----------------------------------------------------
-  // Opens on the classic oblique: Gunung Jerai's massif to the north-east,
-  // the Yan coastal plain and the Straits falling away to the west.
+  // Opens on the valley oblique: Gunung Stong's massif to the south-west,
+  // the Sungai Galas running north-east to its confluence at Kuala Krai.
   // Frame the ground between the tower candidate and the centre of mass of
-  // the modelled inundation, so the scene opens on the decision at hand
-  // rather than on an arbitrary corner of the tile.
+  // the modelled inundation, with the camera behind the tower looking down
+  // the valley, so the scene opens on the decision at hand: mast and
+  // coverage in the foreground, the severed artery and flood beyond.
   const openingLevel = floodLevelForHour(initialHour);
   let wetX = 0;
   let wetZ = 0;
@@ -623,16 +721,44 @@ function createScene(
     (focusZ + towerBase.z) / 2,
   );
   const orbitDistance = Math.max(g.extentX, g.extentZ) * 0.48;
+  const behindTower = new THREE.Vector3(
+    towerBase.x - focusX,
+    0,
+    towerBase.z - focusZ,
+  );
+  if (behindTower.lengthSq() < 1e-6) behindTower.set(-1.15, 0, 0.9);
+  behindTower.normalize().setY(0.62);
   const homePosition = homeTarget
     .clone()
-    .add(
-      new THREE.Vector3(-1.15, 0.66, 0.9)
-        .normalize()
-        .multiplyScalar(orbitDistance),
-    );
+    .add(behindTower.normalize().multiplyScalar(orbitDistance));
   camera.position.copy(homePosition);
   controls.target.copy(homeTarget);
   controls.update();
+
+  // Keep the orbit pivot inside the tile so the view can never wander off
+  // into the void. Its height is only re-grounded once a gesture has ended,
+  // and gently: snapping it to the terrain mid-pan made the camera heave
+  // over every ridge.
+  const halfExtentX = g.extentX / 2;
+  const halfExtentZ = g.extentZ / 2;
+  const clampPivot = (dt: number, gesturing: boolean) => {
+    const target = controls.target;
+    const x = clamp(target.x, -halfExtentX, halfExtentX);
+    const z = clamp(target.z, -halfExtentZ, halfExtentZ);
+    const dx = x - target.x;
+    const dz = z - target.z;
+    let dy = 0;
+    if (!gesturing) {
+      const groundY = elevationToWorldY(elevationAt(x, z));
+      dy = (groundY - target.y) * (1 - Math.exp(-dt / 0.35));
+      if (Math.abs(dy) < 1e-4) dy = 0;
+    }
+    if (dx === 0 && dy === 0 && dz === 0) return;
+    target.set(x, target.y + dy, z);
+    camera.position.x += dx;
+    camera.position.y += dy;
+    camera.position.z += dz;
+  };
 
   // --- Marker projection -------------------------------------------------
   const anchorPoints = anchors.map((anchor) => ({
@@ -688,11 +814,227 @@ function createScene(
   controls.addEventListener('start', markInteraction);
   controls.addEventListener('change', markInteraction);
 
+  // A gesture is a live drag, or a wheel/pinch within the last quarter second.
+  let dragging = false;
+  let gestureUntil = 0;
+  const onDragStart = () => {
+    dragging = true;
+  };
+  const onDragEnd = () => {
+    dragging = false;
+    gestureUntil = performance.now() + GESTURE_TAIL_MS;
+  };
+  controls.addEventListener('start', onDragStart);
+  controls.addEventListener('end', onDragEnd);
+
+  // --- Trackpad gestures -------------------------------------------------
+  // Pinch (ctrl+wheel on macOS) zooms toward the ground under the pointer;
+  // a plain two-finger scroll flies the camera up and down (vertical) and
+  // orbits the pivot (horizontal). Each gesture feeds a goal that the frame
+  // loop eases toward, so nothing steps the way OrbitControls' instant
+  // per-event dolly does.
+  let zoomGoalLog = Math.log(camera.position.distanceTo(controls.target));
+  let zoomActive = false;
+  let orbitPending = 0; // radians of azimuth still to apply
+  let flyPending = 0; // fraction of camera height still to apply
+  const orbitOffset = new THREE.Vector3();
+  const worldUp = new THREE.Vector3(0, 1, 0);
+  const zoomAnchor = new THREE.Vector3();
+  let zoomAnchorValid = false;
+  const wheelRay = new THREE.Vector3();
+  const probe = new THREE.Vector3();
+
+  const belowGround = (point: THREE.Vector3) =>
+    point.y <= elevationToWorldY(elevationAt(point.x, point.z));
+
+  const groundUnderPointer = (
+    clientX: number,
+    clientY: number,
+    out: THREE.Vector3,
+  ) => {
+    const rect = renderer.domElement.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) return false;
+    wheelRay
+      .set(
+        ((clientX - rect.left) / rect.width) * 2 - 1,
+        -((clientY - rect.top) / rect.height) * 2 + 1,
+        0.5,
+      )
+      .unproject(camera)
+      .sub(camera.position)
+      .normalize();
+    // March until the ray dips under the terrain, then bisect the last step.
+    const reach = 2400;
+    const steps = 96;
+    let previous = 0;
+    for (let i = 1; i <= steps; i += 1) {
+      const t = (i / steps) * reach;
+      probe.copy(camera.position).addScaledVector(wheelRay, t);
+      if (
+        Math.abs(probe.x) > halfExtentX + 100 ||
+        Math.abs(probe.z) > halfExtentZ + 100
+      ) {
+        return false;
+      }
+      if (belowGround(probe)) {
+        let low = previous;
+        let high = t;
+        for (let k = 0; k < 8; k += 1) {
+          const mid = (low + high) / 2;
+          probe.copy(camera.position).addScaledVector(wheelRay, mid);
+          if (belowGround(probe)) high = mid;
+          else low = mid;
+        }
+        out.copy(camera.position).addScaledVector(wheelRay, high);
+        return true;
+      }
+      previous = t;
+    }
+    return false;
+  };
+
+  const onWheel = (event: WheelEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? 100 : 1;
+    const deltaX = event.deltaX * unit;
+    const deltaY = event.deltaY * unit;
+    if (event.ctrlKey) {
+      // macOS pinch arrives as ctrl+wheel with tiny deltas.
+      zoomGoalLog = clamp(
+        zoomGoalLog + deltaY * 8 * WHEEL_ZOOM_RATE,
+        Math.log(controls.minDistance),
+        Math.log(controls.maxDistance),
+      );
+      zoomActive = true;
+      zoomAnchorValid = groundUnderPointer(
+        event.clientX,
+        event.clientY,
+        zoomAnchor,
+      );
+    } else {
+      // Two-finger scroll: sideways orbits, up and down flies. Signs follow
+      // natural scrolling so the world moves with the fingers.
+      orbitPending += deltaX * SWIPE_ORBIT_RATE;
+      flyPending -= deltaY * SWIPE_FLY_RATE;
+    }
+    gestureUntil = performance.now() + GESTURE_TAIL_MS;
+    markInteraction();
+  };
+  // Capture on the container so this runs before OrbitControls' own wheel
+  // handler on the canvas; touch pinch still goes through OrbitControls.
+  container.addEventListener('wheel', onWheel, {
+    passive: false,
+    capture: true,
+  });
+
+  const applyGestures = (dt: number) => {
+    const ease = 1 - Math.exp(-dt / GESTURE_EASE_SECONDS);
+
+    // Zoom toward the anchor.
+    const current = camera.position.distanceTo(controls.target);
+    if (!zoomActive) {
+      // Follow touch pinch and programmatic moves so the next wheel starts here.
+      zoomGoalLog = Math.log(current);
+    } else {
+      const goal = Math.exp(zoomGoalLog);
+      if (Math.abs(goal - current) < 0.02) {
+        zoomActive = false;
+      } else {
+        const next = current + (goal - current) * ease;
+        const scale = next / current;
+        const pivot = zoomAnchorValid ? zoomAnchor : controls.target;
+        controls.target.sub(pivot).multiplyScalar(scale).add(pivot);
+        camera.position.sub(pivot).multiplyScalar(scale).add(pivot);
+      }
+    }
+
+    // Orbit around the pivot.
+    if (Math.abs(orbitPending) > 1e-5) {
+      const step = orbitPending * ease;
+      orbitPending -= step;
+      orbitOffset.copy(camera.position).sub(controls.target);
+      orbitOffset.applyAxisAngle(worldUp, step);
+      camera.position.copy(controls.target).add(orbitOffset);
+    } else {
+      orbitPending = 0;
+    }
+
+    // Fly up or down: move the camera vertically over the same pivot. The
+    // polar and distance limits in OrbitControls keep it above the ground
+    // and inside the zoom range.
+    if (Math.abs(flyPending) > 1e-5) {
+      const step = flyPending * ease;
+      flyPending -= step;
+      const height = Math.max(camera.position.y - controls.target.y, 4);
+      camera.position.y += height * step;
+    } else {
+      flyPending = 0;
+    }
+  };
+
+  // --- Adaptive resolution -----------------------------------------------
+  // Start below full Retina density and let measured frame times decide:
+  // step down when frames run long, creep back up when they stay short,
+  // and shave a little more during a gesture so dragging always feels light.
+  const maxRatio = Math.min(deviceRatio, 2);
+  let baseRatio = Math.min(deviceRatio, 1.5);
+  let appliedRatio = 0;
+  const frameTimes: number[] = [];
+  let calmMs = 0;
+
+  const applyRatio = (ratio: number) => {
+    if (Math.abs(ratio - appliedRatio) < 0.01) return;
+    appliedRatio = ratio;
+    renderer.setPixelRatio(ratio);
+    renderer.setSize(
+      container.clientWidth,
+      Math.max(container.clientHeight, 1),
+      false,
+    );
+  };
+
+  const adaptResolution = (dtMs: number, gesturing: boolean) => {
+    frameTimes.push(dtMs);
+    if (frameTimes.length > FRAME_SAMPLE) frameTimes.shift();
+    let sum = 0;
+    for (const value of frameTimes) sum += value;
+    const average = sum / frameTimes.length;
+    if (frameTimes.length === FRAME_SAMPLE && average > 18 && baseRatio > 1) {
+      baseRatio = Math.max(1, baseRatio - 0.25);
+      frameTimes.length = 0;
+      calmMs = 0;
+    } else if (average < 9) {
+      calmMs += dtMs;
+      if (calmMs > 2000 && baseRatio < maxRatio) {
+        baseRatio = Math.min(maxRatio, baseRatio + 0.25);
+        frameTimes.length = 0;
+        calmMs = 0;
+      }
+    } else {
+      calmMs = 0;
+    }
+    applyRatio(gesturing ? Math.max(1, baseRatio * 0.8) : baseRatio);
+  };
+
+  let lastFrameTime = performance.now();
+
   const renderFrame = () => {
     frame = requestAnimationFrame(renderFrame);
-    const idle = performance.now() - lastInteraction > IDLE_DRIFT_DELAY;
+    const now = performance.now();
+    const dtMs = Math.min(now - lastFrameTime, 50);
+    lastFrameTime = now;
+    const dt = dtMs / 1000;
+    const gesturing = dragging || now < gestureUntil;
+    const idle = now - lastInteraction > IDLE_DRIFT_DELAY;
     controls.autoRotate = idle && !reduceMotion?.matches;
-    controls.update();
+    // OrbitControls damps per update() call; scale the factor by the frame
+    // interval so the feel is the same at 60 Hz and on a 120 Hz display.
+    controls.dampingFactor = 1 - Math.pow(1 - BASE_DAMPING, dtMs / (1000 / 60));
+    applyGestures(dt);
+    controls.update(dt);
+    clampPivot(dt, gesturing);
+    adaptResolution(dtMs, gesturing);
     updateMarkers();
     renderer.render(scene, camera);
   };
@@ -715,6 +1057,8 @@ function createScene(
     } else if (!document.hidden && !running) {
       running = true;
       lastInteraction = performance.now();
+      lastFrameTime = performance.now();
+      frameTimes.length = 0;
       frame = requestAnimationFrame(renderFrame);
     }
   };
@@ -726,16 +1070,23 @@ function createScene(
       roadGroup.visible = layers.roads;
       coverageGroup.visible = layers.coverage;
       towerGroup.visible = layers.towers;
+      houseGroup.visible = layers.population;
     },
     setHour(hour) {
       buildFlood(hour);
       paintRoads(hour);
+      paintHouses(hour);
       if (status.severed) status.severed.textContent = severedKm.toFixed(1);
       if (status.area) status.area.textContent = floodedKm2.toFixed(1);
+      if (status.homes) status.homes.textContent = String(homesFlooded);
     },
     resetView() {
       camera.position.copy(homePosition);
       controls.target.copy(homeTarget);
+      zoomActive = false;
+      zoomAnchorValid = false;
+      orbitPending = 0;
+      flyPending = 0;
       controls.update();
       lastInteraction = performance.now();
     },
@@ -743,8 +1094,11 @@ function createScene(
       cancelAnimationFrame(frame);
       observer.disconnect();
       document.removeEventListener('visibilitychange', onVisibility);
+      container.removeEventListener('wheel', onWheel, { capture: true });
       controls.removeEventListener('start', markInteraction);
       controls.removeEventListener('change', markInteraction);
+      controls.removeEventListener('start', onDragStart);
+      controls.removeEventListener('end', onDragEnd);
       controls.dispose();
       scene.traverse((object) => {
         if (object instanceof THREE.Mesh) {
@@ -783,6 +1137,7 @@ export function Terrain3D({
   const markerRefs = useRef(new Map<string, HTMLDivElement>());
   const severedRef = useRef<HTMLSpanElement>(null);
   const areaRef = useRef<HTMLSpanElement>(null);
+  const homesRef = useRef<HTMLSpanElement>(null);
   const sceneRef = useRef<SceneHandle | null>(null);
   const timelineRef = useRef(timeline);
   const anchors = useMemo(
@@ -817,6 +1172,7 @@ export function Terrain3D({
       {
         severed: severedRef.current,
         area: areaRef.current,
+        homes: homesRef.current,
       },
       timelineRef.current,
     );
@@ -863,11 +1219,15 @@ export function Terrain3D({
         <span ref={severedRef} className="tabular-nums">
           0
         </span>
-        km of road cut ·
+        km of road & rail cut ·
         <span ref={areaRef} className="tabular-nums">
           0
         </span>
-        km² inundated
+        km² inundated ·
+        <span ref={homesRef} className="tabular-nums">
+          0
+        </span>
+        homes flooded
       </div>
       <div className="pointer-events-none absolute inset-0 overflow-hidden">
         {anchors.map((anchor) => {

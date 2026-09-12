@@ -18,7 +18,6 @@ import {
   Home,
   Info,
   Layers3,
-  LocateFixed,
   LogOut,
   MapPin,
   Menu,
@@ -63,8 +62,8 @@ const layerOptions: Array<{
   { key: 'coverage', label: 'Network Coverage', icon: Signal },
   { key: 'towers', label: 'Current Tower Status', icon: RadioTower },
   { key: 'flood', label: 'Flood Hazards', icon: Waves },
-  { key: 'roads', label: 'Road Network Status', icon: Route },
-  { key: 'population', label: 'Population Density', icon: Users },
+  { key: 'roads', label: 'Road & Rail Status', icon: Route },
+  { key: 'population', label: 'Settlements & Homes', icon: Users },
 ];
 
 const utilityItems: Array<{ label: string; icon: IconComponent }> = [
@@ -295,7 +294,7 @@ function TerrainStage({
 }) {
   return (
     <section
-      aria-label="Interactive 3D terrain model of Yan and Gunung Jerai"
+      aria-label="Interactive 3D terrain model of the Sungai Galas valley, Dabong to Kuala Krai"
       className="absolute inset-0 overflow-hidden bg-[#173b31]"
     >
       <Suspense fallback={<TerrainFallback />}>
@@ -308,14 +307,8 @@ function TerrainStage({
       <div className="map-vignette pointer-events-none absolute inset-0" />
       <p className="pointer-events-none absolute bottom-1 right-3 z-20 hidden text-[10px] leading-4 text-white/45 lg:block">
         Elevation NASA SRTM · Imagery Sentinel-2 cloudless by EOX (CC BY 4.0,
-        ESA Copernicus) · Roads © OpenStreetMap contributors (ODbL)
+        ESA Copernicus) · Roads, rail & settlements © OpenStreetMap contributors (ODbL)
       </p>
-      <div className="pointer-events-none absolute bottom-5 left-20 hidden items-center gap-2 text-[11px] font-medium tracking-[0.06em] text-white/60 uppercase md:flex">
-        <LocateFixed className="size-3.5" />
-        5.792° N, 100.402° E
-        <span className="h-3 w-px bg-white/20" />
-        Drag to orbit · scroll to zoom
-      </div>
     </section>
   );
 }
@@ -331,7 +324,9 @@ function LayerPanel({
     <aside className="absolute left-16 top-20 z-30 hidden w-72 md:block">
       <div className="glass-panel flex items-start gap-3 rounded-xl px-3.5 py-3 text-sm font-medium text-slate-100">
         <MapPin className="mt-0.5 size-4 shrink-0 text-sky-300" aria-hidden />
-        <span className="leading-5">Yan and Gunung Jerai, Kedah, Malaysia</span>
+        <span className="leading-5">
+          Dabong – Kuala Krai, Sungai Galas valley, Kelantan, Malaysia
+        </span>
       </div>
       <div className="glass-panel mt-2 overflow-hidden rounded-xl p-2">
         <div className="flex items-center justify-between px-2 pb-2 pt-1">
@@ -411,8 +406,8 @@ function TimelinePanel({
       </div>
       <div className="mt-3 h-2 rounded-full border border-white/10 bg-gradient-to-r from-[#a7dff5] via-[#0ea5e9] to-[#0a4a87] shadow-[0_0_18px_rgb(14_165_233/22%)]" />
       <div className="mt-1.5 flex justify-between text-[11px] text-slate-400">
-        <span>Shallow (&lt;0.3m)</span>
-        <span>Deep (&gt;1.5m)</span>
+        <span>Shallow (&lt;1m)</span>
+        <span>Deep (&gt;10m)</span>
       </div>
       <div className="mt-4 flex items-center gap-3 border-t border-slate-600/30 pt-4">
         <Button
@@ -548,7 +543,7 @@ function InterventionContent({ onClose }: { onClose?: () => void }) {
               +13,369
             </div>
             <p className="mt-1.5 text-xs text-emerald-100/55">
-              Across 12 priority communities
+              Across the Galas valley: Dabong, Manek Urai, Kuala Krai
             </p>
           </div>
           <MetricCard
@@ -712,7 +707,7 @@ function MobileControls({
         >
           <MapPin className="size-4 shrink-0 text-sky-300" aria-hidden />
           <span className="min-w-0 flex-1 truncate text-sm font-medium text-white">
-            Yan · Gunung Jerai, Kedah
+            Dabong – Kuala Krai, Kelantan
           </span>
           <span className="rounded border border-amber-300/20 bg-amber-300/8 px-1.5 py-1 text-[9px] font-bold tracking-[0.08em] text-amber-200 uppercase">
             Concept
@@ -858,14 +853,19 @@ export function ResilinetDashboard() {
         />
         NASA SRTM · Sentinel-2
       </div>
-      <button
-        type="button"
-        aria-label="Reset map view"
-        onClick={() => setResetSignal((value) => value + 1)}
-        className="absolute bottom-6 right-[362px] z-20 hidden size-10 place-items-center rounded-xl border border-white/15 bg-slate-950/65 text-slate-300 backdrop-blur-md hover:bg-slate-800 hover:text-white xl:grid"
-      >
-        <RotateCcw className="size-4" aria-hidden />
-      </button>
+      <div className="absolute bottom-6 right-[362px] z-20 hidden items-center gap-2 xl:flex">
+        <span className="hidden text-[10px] font-medium tracking-[0.06em] text-white/55 uppercase 2xl:block">
+          Drag to pan · pinch to zoom · two fingers up/down to fly · left/right to orbit
+        </span>
+        <button
+          type="button"
+          aria-label="Reset map view"
+          onClick={() => setResetSignal((value) => value + 1)}
+          className="grid size-10 place-items-center rounded-xl border border-white/15 bg-slate-950/65 text-slate-300 backdrop-blur-md hover:bg-slate-800 hover:text-white"
+        >
+          <RotateCcw className="size-4" aria-hidden />
+        </button>
+      </div>
       <div className="pointer-events-none absolute inset-x-0 top-14 z-20 h-px bg-gradient-to-r from-transparent via-sky-300/25 to-transparent" />
     </main>
   );

@@ -43,6 +43,7 @@ export type TerrainMeta = {
   roads: RoadWay[];
   places: Place[];
   towerSite: TowerSite;
+  houses: { file: string; count: number };
   attribution: string[];
 };
 
@@ -53,6 +54,8 @@ export type TerrainData = {
   /** Height above nearest drainage in decimetres; 255 means dry or sea. */
   hand: Uint8Array;
   surface: ImageBitmap;
+  /** [lon, lat, heading] triplets: OSM buildings plus illustrative homes. */
+  houses: Float32Array;
   width: number;
   height: number;
 };
@@ -72,9 +75,13 @@ export function smoothstep(edge0: number, edge1: number, value: number) {
   return t * t * (3 - 2 * t);
 }
 
-/** Scenario hour to a HAND threshold in metres, matching the legend's range. */
+/**
+ * Scenario hour to a HAND threshold in metres, matching the legend's range.
+ * Runs 0.5 → 14 m: the Galas rose roughly 18 m at Dabong in December 2014,
+ * and the baked HAND raster caps at 25.4 m.
+ */
 export function floodLevelForHour(hour: number) {
-  return 0.2 + (clamp(hour, 0, 16) / 16) * 2.4;
+  return 0.5 + (clamp(hour, 0, 16) / 16) * 13.5;
 }
 
 export const mercatorX = (lon: number) => lon / 360 + 0.5;
@@ -163,9 +170,10 @@ export async function loadTerrain(base = '/terrain'): Promise<TerrainData> {
     throw new Error(`Failed to load terrain metadata: ${metaResponse.status}`);
   }
   const meta = (await metaResponse.json()) as TerrainMeta;
-  const [elevationBuffer, handBuffer, surface] = await Promise.all([
+  const [elevationBuffer, handBuffer, houseBuffer, surface] = await Promise.all([
     loadBinary(`${base}/elevation.bin`),
     loadBinary(`${base}/hand.bin`),
+    loadBinary(`${base}/${meta.houses.file}`),
     loadImageBitmap(`${base}/${meta.texture.file}`),
   ]);
 
@@ -173,6 +181,7 @@ export async function loadTerrain(base = '/terrain'): Promise<TerrainData> {
     meta,
     elevation: new Int16Array(elevationBuffer),
     hand: new Uint8Array(handBuffer),
+    houses: new Float32Array(houseBuffer),
     surface,
     width: meta.grid.width,
     height: meta.grid.height,
