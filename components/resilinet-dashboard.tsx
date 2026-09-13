@@ -3,31 +3,29 @@
 import {
   lazy,
   Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
   useState,
+  useSyncExternalStore,
   type ComponentType,
-  type CSSProperties,
 } from 'react';
 import {
   Antenna,
   BookOpen,
   Check,
   ChevronDown,
-  CircleDollarSign,
-  CloudRain,
-  Globe2,
+  ChevronLeft,
   Home,
-  Info,
   Layers3,
   LogOut,
   MapPin,
-  Menu,
   MousePointer2,
   Pause,
   Play,
   RadioTower,
   RotateCcw,
   Route,
-  Satellite,
   Settings,
   ShieldCheck,
   Signal,
@@ -38,9 +36,20 @@ import {
 } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
-import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Slider } from '@/components/ui/slider';
 import { Switch } from '@/components/ui/switch';
+import type { RouteRun, View } from '@/components/terrain-3d';
+import {
+  type FloodCurve,
+  type Forecast,
+  floodCurve,
+  loadForecast,
+  MAX_LEVEL,
+  MIN_LEVEL,
+} from '@/lib/forecast';
+import { evaluateRoutes, type RouteEvaluation } from '@/lib/routing';
+import { assessSites, type SiteAssessment } from '@/lib/sites';
+import { clamp, type TerrainData, terrainResource } from '@/lib/terrain-field';
 
 type LayerKey = 'coverage' | 'towers' | 'flood' | 'roads' | 'population';
 type IconComponent = ComponentType<{
@@ -74,16 +83,165 @@ const utilityItems: Array<{ label: string; icon: IconComponent }> = [
   { label: 'Settings', icon: Settings },
 ];
 
-const councilOptions = [
-  ['Fixed Weighting 1', 'Balanced response'],
-  ['Fixed Weighting 2', 'Population first'],
-  ['Fixed Weighting 3', 'Access first'],
-  ['Fixed Weighting 4', 'Cost first'],
+type Stage = 'now' | 'forecast' | 'site';
+
+// Kuala Krai gauge (Sungai Kelantan), metres above gauge datum. Danger level
+// and the 2014 record are the published JPS figures; the slider range brackets
+// them.
+const GAUGE_MIN = 20;
+const GAUGE_MAX = 34;
+const GAUGE_STEP = 0.1;
+const GAUGE_DANGER = 25;
+const GAUGE_RECORD_2014 = 34.2;
+const GAUGE_DEFAULT = 27;
+
+/**
+ * Wall-clock "now", at minute resolution so re-renders only happen when the
+ * displayed time actually changes. null during prerender, before the browser
+ * clock is available. The forecast data is illustrative, but its hour 0 is
+ * always the real current time: forecast hour h reads as now + h hours.
+ */
+function useClock() {
+  return useSyncExternalStore(
+    (onChange) => {
+      const id = setInterval(onChange, 15_000);
+      return () => clearInterval(id);
+    },
+    () => Math.floor(Date.now() / 60_000) * 60_000,
+    () => null,
+  );
+}
+
+const clockFormat = new Intl.DateTimeFormat('en-GB', {
+  hour: '2-digit',
+  minute: '2-digit',
+  hour12: false,
+});
+
+/** "21:37" for now + hoursAhead, or a placeholder before the clock is known. */
+function clockLabel(now: number | null, hoursAhead = 0) {
+  if (now === null) return '--:--';
+  return clockFormat.format(new Date(now + hoursAhead * 3_600_000));
+}
+
+/**
+ * Illustrative mapping from the gauge reading to the scene's HAND threshold:
+ * every metre above danger level is taken as a metre of water above the
+ * drainage datum across the valley. A real deployment would replace this
+ * with a rating curve per reach.
+ */
+const gaugeToHandLevel = (gauge: number) => clamp(gauge - GAUGE_DANGER, 0.5, 14);
+
+const stages: Array<{
+  key: Stage;
+  label: string;
+  heading: string;
+  helper: string;
+}> = [
+  {
+    key: 'now',
+    label: 'Now',
+    heading: 'Flooding now',
+    helper: 'Enter the observed river level to see the flood as it is right now.',
+  },
+  {
+    key: 'forecast',
+    label: 'Forecast',
+    heading: 'Rain forecast',
+    helper:
+      'Rain is still falling. Review the hourly forecast and choose the hour to plan for.',
+  },
+  {
+    key: 'site',
+    label: 'Site',
+    heading: 'Tower site',
+    helper: 'Press Start to evaluate routes and sites.',
+  },
 ];
 
-function TopBar() {
-  const [navOpen, setNavOpen] = useState(false);
+function StageIndicator({
+  stage,
+  setStage,
+}: {
+  stage: Stage;
+  setStage: (stage: Stage) => void;
+}) {
+  const current = stages.findIndex((entry) => entry.key === stage);
+  return (
+    <>
+      {/* Phones get one pill with a back button instead of three chips. */}
+      <div className="flex items-center gap-1 rounded-full border border-slate-600/50 bg-slate-900/70 p-1 md:hidden">
+        {current > 0 && (
+          <button
+            type="button"
+            onClick={() => setStage(stages[current - 1]!.key)}
+            aria-label={`Back to ${stages[current - 1]!.label}`}
+            className="grid size-8 place-items-center rounded-full text-sky-200 hover:bg-slate-700/60"
+          >
+            <ChevronLeft className="size-4" aria-hidden />
+          </button>
+        )}
+        <span
+          aria-current="step"
+          className="flex min-h-8 items-center gap-1.5 rounded-full bg-sky-400 px-3 text-xs font-semibold tracking-[0.04em] text-slate-950"
+        >
+          {current + 1}/{stages.length} · {stages[current]!.label}
+        </span>
+      </div>
+    <ol
+      aria-label="Workflow steps"
+      className="hidden items-center gap-1 rounded-full border border-slate-600/50 bg-slate-900/70 p-1 md:flex"
+    >
+      {stages.map((entry, index) => {
+        const state =
+          index === current ? 'current' : index < current ? 'done' : 'todo';
+        return (
+          <li key={entry.key}>
+            <button
+              type="button"
+              disabled={state === 'todo'}
+              onClick={() => setStage(entry.key)}
+              aria-current={state === 'current' ? 'step' : undefined}
+              className={`flex min-h-9 items-center gap-1.5 rounded-full px-3 text-xs font-semibold tracking-[0.04em] transition-colors ${
+                state === 'current'
+                  ? 'bg-sky-400 text-slate-950'
+                  : state === 'done'
+                    ? 'text-sky-200 hover:bg-slate-700/60 hover:text-white'
+                    : 'text-slate-500'
+              }`}
+            >
+              <span
+                className={`grid size-5 place-items-center rounded-full text-[11px] ${
+                  state === 'current'
+                    ? 'bg-slate-950/20'
+                    : state === 'done'
+                      ? 'bg-sky-400/20'
+                      : 'bg-slate-700/60'
+                }`}
+              >
+                {state === 'done' ? (
+                  <Check className="size-3" aria-hidden />
+                ) : (
+                  index + 1
+                )}
+              </span>
+              <span>{entry.label}</span>
+            </button>
+          </li>
+        );
+      })}
+    </ol>
+    </>
+  );
+}
 
+function TopBar({
+  stage,
+  setStage,
+}: {
+  stage: Stage;
+  setStage: (stage: Stage) => void;
+}) {
   return (
     <header className="fixed inset-x-0 top-0 z-50 flex h-14 items-center border-b border-slate-600/45 bg-[#07111b]/92 px-3 backdrop-blur-xl sm:px-5">
       <div className="flex min-w-0 items-center gap-3">
@@ -100,63 +258,11 @@ function TopBar() {
         </div>
       </div>
 
-      <nav
-        aria-label="Primary navigation"
-        className="ml-auto hidden items-center gap-7 lg:flex"
-      >
-        {['Global', 'Developers', 'Develops', 'About', 'Contact'].map(
-          (item) => (
-            <button
-              key={item}
-              type="button"
-              className="flex min-h-11 items-center gap-1.5 text-sm text-slate-300 transition-colors hover:text-white"
-            >
-              {item === 'Global' && <Globe2 className="size-4" aria-hidden />}
-              {item}
-            </button>
-          ),
-        )}
-      </nav>
-
-      <div className="ml-auto flex items-center gap-2 lg:ml-5">
-        <span className="hidden items-center gap-1.5 rounded-md border border-amber-300/20 bg-amber-300/8 px-2 py-1.5 text-[11px] font-semibold tracking-[0.08em] text-amber-200 uppercase md:flex">
-          <span className="size-1.5 rounded-full bg-amber-300" />
-          Static UI concept
-        </span>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-lg"
-          className="text-slate-300 hover:bg-slate-800 hover:text-white lg:hidden"
-          aria-label={navOpen ? 'Close navigation' : 'Open navigation'}
-          aria-expanded={navOpen}
-          onClick={() => setNavOpen((value) => !value)}
-        >
-          {navOpen ? <X className="size-5" /> : <Menu className="size-5" />}
-        </Button>
+      {/* Centred on wide screens; tucked to the right on phones so it clears the wordmark. */}
+      <div className="absolute right-3 top-1/2 -translate-y-1/2 md:left-1/2 md:right-auto md:-translate-x-1/2">
+        <StageIndicator stage={stage} setStage={setStage} />
       </div>
 
-      {navOpen && (
-        <nav
-          aria-label="Mobile navigation"
-          className="glass-panel absolute right-3 top-[62px] w-52 rounded-xl p-2 lg:hidden"
-        >
-          {['Global', 'Developers', 'Develops', 'About', 'Contact'].map(
-            (item) => (
-              <button
-                key={item}
-                type="button"
-                className="flex min-h-11 w-full items-center gap-2 rounded-lg px-3 text-left text-sm text-slate-200 hover:bg-slate-700/45"
-              >
-                {item === 'Global' && (
-                  <Globe2 className="size-4 text-sky-300" aria-hidden />
-                )}
-                {item}
-              </button>
-            ),
-          )}
-        </nav>
-      )}
     </header>
   );
 }
@@ -285,11 +391,35 @@ function TerrainFallback() {
 
 function TerrainStage({
   layers,
-  timeline,
+  level,
+  view,
+  forecast,
+  forecastHour,
+  routeRun,
+  onRouteProgress,
+  onRouteDone,
+  spawnedIds,
+  onSiteSpawn,
+  onSitesDone,
+  winnerId,
+  previewId,
+  onPreview,
   resetSignal,
 }: {
   layers: Record<LayerKey, boolean>;
-  timeline: number;
+  level: number;
+  view: View;
+  forecast: Forecast | null;
+  forecastHour: number;
+  routeRun: RouteRun | null;
+  onRouteProgress: (state: { reachableKm: number; cuts: number }) => void;
+  onRouteDone: () => void;
+  spawnedIds: string[];
+  onSiteSpawn: (id: string) => void;
+  onSitesDone: () => void;
+  winnerId: string | null;
+  previewId: string | null;
+  onPreview: (id: string) => void;
   resetSignal: number;
 }) {
   return (
@@ -300,7 +430,19 @@ function TerrainStage({
       <Suspense fallback={<TerrainFallback />}>
         <Terrain3D
           layers={layers}
-          timeline={timeline}
+          level={level}
+          view={view}
+          forecast={forecast}
+          forecastHour={forecastHour}
+          routeRun={routeRun}
+          onRouteProgress={onRouteProgress}
+          onRouteDone={onRouteDone}
+          spawnedIds={spawnedIds}
+          onSiteSpawn={onSiteSpawn}
+          onSitesDone={onSitesDone}
+          winnerId={winnerId}
+          previewId={previewId}
+          onPreview={onPreview}
           resetSignal={resetSignal}
         />
       </Suspense>
@@ -376,144 +518,592 @@ function LayerPanel({
   );
 }
 
-function TimelinePanel({
-  timeline,
-  setTimeline,
-  playing,
-  setPlaying,
+function GaugeControl({
+  gauge,
+  setGauge,
+  now,
+  onNext,
 }: {
-  timeline: number;
-  setTimeline: (value: number) => void;
-  playing: boolean;
-  setPlaying: (value: boolean) => void;
+  gauge: number;
+  setGauge: (value: number) => void;
+  now: number | null;
+  onNext: () => void;
 }) {
-  const hour = `H${String(timeline).padStart(2, '0')}`;
+  const aboveDanger = gauge - GAUGE_DANGER;
+  const commit = (raw: string) => {
+    const value = Number.parseFloat(raw);
+    if (Number.isFinite(value)) {
+      setGauge(clamp(Math.round(value * 10) / 10, GAUGE_MIN, GAUGE_MAX));
+    }
+  };
 
   return (
-    <aside className="glass-panel absolute bottom-6 left-16 z-30 hidden w-[min(520px,calc(100vw-470px))] min-w-[360px] rounded-xl p-4 md:block">
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <p className="text-xs font-semibold tracking-[0.1em] text-slate-400 uppercase">
-            HAND
+    <section className="mt-4">
+      <div className="flex items-center justify-between">
+        <h3 className="text-xs font-semibold tracking-[0.12em] text-slate-300 uppercase">
+          Observed level
+        </h3>
+        <span className="flex items-center gap-1.5 rounded-md border border-red-300/20 bg-red-400/10 px-2 py-1 text-[10px] font-semibold tracking-[0.08em] text-red-200 uppercase">
+          <span className="size-1.5 animate-pulse rounded-full bg-red-400" />
+          Now · {clockLabel(now)}
+        </span>
+      </div>
+
+      <div className="mt-3 rounded-xl border border-slate-600/30 bg-slate-900/35 p-3.5">
+        <label
+          htmlFor="gauge-reading"
+          className="text-[11px] font-semibold tracking-[0.1em] text-slate-500 uppercase"
+        >
+          Kuala Krai gauge
+        </label>
+        <div className="mt-1.5 flex items-baseline gap-2">
+          {/* Uncontrolled and re-keyed on the committed value, so typing is
+              not interrupted and the slider still refreshes the field. */}
+          <input
+            id="gauge-reading"
+            key={gauge}
+            type="number"
+            inputMode="decimal"
+            min={GAUGE_MIN}
+            max={GAUGE_MAX}
+            step={GAUGE_STEP}
+            defaultValue={gauge.toFixed(1)}
+            onBlur={(event) => commit(event.currentTarget.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') commit(event.currentTarget.value);
+            }}
+            className="w-28 rounded-lg border border-slate-600/40 bg-slate-950/60 px-3 py-2 text-[28px] font-semibold leading-none tracking-[-0.03em] text-white tabular-nums outline-none focus:border-sky-300/60 focus:ring-2 focus:ring-sky-300/25"
+          />
+          <span className="text-sm text-slate-400">m</span>
+        </div>
+        <Slider
+          value={[gauge]}
+          min={GAUGE_MIN}
+          max={GAUGE_MAX}
+          step={GAUGE_STEP}
+          onValueChange={(value) =>
+            setGauge(typeof value === 'number' ? value : (value[0] ?? gauge))
+          }
+          aria-label="Kuala Krai gauge reading in metres"
+          className="mt-4 [&_[data-slot=slider-range]]:bg-sky-400 [&_[data-slot=slider-thumb]]:size-4 [&_[data-slot=slider-thumb]]:border-white [&_[data-slot=slider-thumb]]:bg-sky-400 [&_[data-slot=slider-track]]:h-1 [&_[data-slot=slider-track]]:bg-slate-600"
+        />
+        <div className="mt-2 flex justify-between text-[11px] text-slate-500 tabular-nums">
+          <span>Danger level {GAUGE_DANGER.toFixed(1)} m</span>
+          <span>Record 2014: {GAUGE_RECORD_2014.toFixed(1)} m</span>
+        </div>
+        <p
+          className={`mt-3 rounded-lg border px-2.5 py-2 text-xs font-medium tabular-nums ${
+            aboveDanger >= 0
+              ? 'border-red-300/20 bg-red-400/10 text-red-100'
+              : 'border-emerald-300/20 bg-emerald-400/10 text-emerald-100'
+          }`}
+          aria-live="polite"
+        >
+          {aboveDanger >= 0
+            ? `${aboveDanger.toFixed(1)} m above danger level`
+            : `${(-aboveDanger).toFixed(1)} m below danger level`}
+        </p>
+      </div>
+
+      <Button
+        type="button"
+        onClick={onNext}
+        className="mt-4 min-h-11 w-full rounded-lg bg-sky-400 text-sm font-semibold text-slate-950 hover:bg-sky-300"
+      >
+        Forecast →
+      </Button>
+    </section>
+  );
+}
+
+// Chart geometry in viewBox units; the SVG scales with its container.
+const CHART_W = 640;
+const CHART_H = 150;
+const CHART_ML = 34;
+const CHART_MR = 14;
+const CHART_MT = 26;
+const CHART_MB = 18;
+const HOUR_STEP = 0.25;
+const PLAY_HOURS_PER_SECOND = 2;
+
+/**
+ * The forecast control: the predicted river curve drawn over the catchment
+ * rain, with the peak pinned. The chart itself is the slider that picks the
+ * planning hour.
+ */
+function ForecastTimeline({
+  forecast,
+  curve,
+  hour,
+  setHour,
+  now,
+  floor,
+  onNext,
+}: {
+  forecast: Forecast;
+  curve: FloodCurve;
+  hour: number;
+  setHour: (hour: number) => void;
+  now: number | null;
+  /** Level the river is at right now, from the gauge. */
+  floor: number;
+  onNext: () => void;
+}) {
+  const [playing, setPlaying] = useState(false);
+  const maxHour = forecast.hours - 1;
+  const plotW = CHART_W - CHART_ML - CHART_MR;
+  const plotH = CHART_H - CHART_MT - CHART_MB;
+  const baseline = CHART_MT + plotH;
+  const x = (h: number) => CHART_ML + (h / maxHour) * plotW;
+  const y = (level: number) =>
+    CHART_MT + (1 - (level - MIN_LEVEL) / (MAX_LEVEL - MIN_LEVEL)) * plotH;
+  const rainMax = Math.max(1, ...forecast.catchmentMeanMmPerHour) * 1.15;
+  const rainY = (mm: number) => baseline - (mm / rainMax) * plotH * 0.55;
+  const barWidth = (plotW / maxHour) * 0.6;
+
+  const linePath = curve.levels
+    .map((level, h) => `${h === 0 ? 'M' : 'L'}${x(h).toFixed(1)},${y(level).toFixed(1)}`)
+    .join(' ');
+  const areaPath = `${linePath} L${x(maxHour).toFixed(1)},${baseline} L${x(0).toFixed(1)},${baseline} Z`;
+
+  const peakHour = curve.peakHour();
+  const peakLevel = curve.peakLevel();
+  const atPeak = Math.abs(hour - peakHour) < HOUR_STEP / 2;
+  const level = curve.levelAt(hour);
+  const h0 = Math.floor(hour);
+  const h1 = Math.min(h0 + 1, maxHour);
+  const rain =
+    (forecast.catchmentMeanMmPerHour[h0] ?? 0) * (1 - (hour - h0)) +
+    (forecast.catchmentMeanMmPerHour[h1] ?? 0) * (hour - h0);
+  const isPlaying = playing && hour < maxHour;
+
+  // Playback advances a quarter hour at a time and simply stops at the end.
+  useEffect(() => {
+    if (!playing || hour >= maxHour) return;
+    const id = setTimeout(
+      () => setHour(Math.min(maxHour, hour + HOUR_STEP)),
+      1000 / (PLAY_HOURS_PER_SECOND / HOUR_STEP),
+    );
+    return () => clearTimeout(id);
+  }, [playing, hour, maxHour, setHour]);
+
+  const pick = (next: number) => {
+    setPlaying(false);
+    setHour(next);
+  };
+
+  const timeLabels: number[] = [];
+  for (let h = 0; h <= maxHour; h += 3) timeLabels.push(h);
+  const peakTagWidth = 74;
+  const peakTagX = clamp(x(peakHour) - peakTagWidth / 2, CHART_ML, CHART_W - CHART_MR - peakTagWidth);
+  const peakTagY = Math.max(2, y(peakLevel) - 22);
+
+  return (
+    <aside
+      aria-label="River forecast"
+      className="glass-panel absolute inset-x-3 bottom-[76px] z-30 rounded-xl p-3 md:bottom-6 md:left-16 md:right-auto md:w-[min(760px,calc(100vw-470px))] md:min-w-[360px] md:p-4"
+    >
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="min-w-0 flex-1">
+          <p className="text-[11px] font-semibold tracking-[0.1em] text-slate-400 uppercase">
+            River forecast · Kuala Krai
           </p>
-          <h2 className="mt-0.5 text-sm font-medium text-slate-100">
-            Height Above Nearest Drainage
-          </h2>
+          <p
+            className="mt-0.5 text-sm font-semibold text-white tabular-nums"
+            aria-live="polite"
+          >
+            {clockLabel(now, hour)}{' '}
+            <span className="font-normal text-slate-400">
+              (+{hour.toFixed(hour % 1 === 0 ? 0 : 2)} h)
+            </span>
+            <span className="mx-1.5 text-slate-600">·</span>
+            {level.toFixed(1)} m
+            <span className="mx-1.5 text-slate-600">·</span>
+            <span className="font-normal text-slate-300">{rain.toFixed(1)} mm/h</span>
+            {atPeak && (
+              <span className="ml-2 rounded border border-amber-300/25 bg-amber-300/10 px-1.5 py-0.5 text-[10px] font-semibold tracking-[0.08em] text-amber-200 uppercase">
+                Peak
+              </span>
+            )}
+          </p>
         </div>
-        <div className="flex items-center gap-2 text-[11px] text-slate-400">
-          <CloudRain className="size-3.5 text-sky-300" /> Modelled flood depth
-        </div>
-      </div>
-      <div className="mt-3 h-2 rounded-full border border-white/10 bg-gradient-to-r from-[#a7dff5] via-[#0ea5e9] to-[#0a4a87] shadow-[0_0_18px_rgb(14_165_233/22%)]" />
-      <div className="mt-1.5 flex justify-between text-[11px] text-slate-400">
-        <span>Shallow (&lt;1m)</span>
-        <span>Deep (&gt;10m)</span>
-      </div>
-      <div className="mt-4 flex items-center gap-3 border-t border-slate-600/30 pt-4">
         <Button
           type="button"
           size="icon-lg"
-          onClick={() => setPlaying(!playing)}
-          className="size-9 rounded-lg bg-sky-400 text-slate-950 hover:bg-sky-300"
-          aria-label={playing ? 'Pause timeline' : 'Play timeline'}
+          onClick={() => {
+            if (isPlaying) {
+              setPlaying(false);
+              return;
+            }
+            if (hour >= maxHour) setHour(0);
+            setPlaying(true);
+          }}
+          className="size-11 rounded-lg bg-slate-800/80 text-slate-100 hover:bg-slate-700"
+          aria-label={isPlaying ? 'Pause forecast playback' : 'Play forecast'}
+          aria-pressed={isPlaying}
         >
-          {playing ? (
+          {isPlaying ? (
             <Pause className="size-4 fill-current" />
           ) : (
             <Play className="size-4 fill-current" />
           )}
         </Button>
-        <span className="text-xs font-semibold tabular-nums text-slate-300">
-          H08
-        </span>
-        <div className="relative flex-1 pt-5">
-          <output
-            className="absolute left-[var(--timeline-position)] top-0 -translate-x-1/2 rounded bg-white px-1.5 py-0.5 text-[10px] font-bold text-slate-900 shadow-lg"
-            style={
-              {
-                '--timeline-position': `${(timeline / 16) * 100}%`,
-              } as CSSProperties
-            }
+        <Button
+          type="button"
+          onClick={onNext}
+          className="min-h-11 rounded-lg bg-sky-400 px-4 text-sm font-semibold text-slate-950 hover:bg-sky-300"
+        >
+          {atPeak ? 'Plan for the peak' : 'Plan for this hour'}
+        </Button>
+      </div>
+
+      {/* The chart is the slider: an invisible native range input covers the
+          plot area, so drag, click, arrow keys, Home/End and screen readers
+          all work without custom handling. */}
+      <div className="relative mt-2 rounded-lg has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-sky-300/60">
+        <input
+          type="range"
+          min={0}
+          max={maxHour}
+          step={HOUR_STEP}
+          value={hour}
+          onChange={(event) => pick(Number(event.target.value))}
+          onKeyDown={(event) => {
+            // Shift + arrow steps a whole hour.
+            if (!event.shiftKey) return;
+            const delta =
+              event.key === 'ArrowRight' || event.key === 'ArrowUp'
+                ? 1
+                : event.key === 'ArrowLeft' || event.key === 'ArrowDown'
+                  ? -1
+                  : 0;
+            if (delta === 0) return;
+            event.preventDefault();
+            pick(clamp(hour + delta, 0, maxHour));
+          }}
+          aria-label="Forecast hour"
+          aria-valuetext={`${clockLabel(now, hour)}, river level ${level.toFixed(1)} metres`}
+          className="absolute inset-y-0 z-10 m-0 cursor-ew-resize appearance-none bg-transparent opacity-0"
+          style={{
+            left: `${(CHART_ML / CHART_W) * 100}%`,
+            width: `${(plotW / CHART_W) * 100}%`,
+          }}
+        />
+        <svg
+          viewBox={`0 0 ${CHART_W} ${CHART_H}`}
+          className="block w-full select-none"
+          aria-hidden
+        >
+          {/* level gridlines and ticks */}
+          {[MIN_LEVEL, 7, MAX_LEVEL].map((tick) => (
+            <g key={tick}>
+              <line
+                x1={CHART_ML}
+                x2={CHART_W - CHART_MR}
+                y1={y(tick)}
+                y2={y(tick)}
+                stroke="rgb(148 163 184 / 0.18)"
+                strokeWidth={1}
+              />
+              <text
+                x={CHART_ML - 6}
+                y={y(tick) + 3}
+                textAnchor="end"
+                fontSize={9}
+                fill="rgb(148 163 184)"
+              >
+                {tick === MAX_LEVEL ? `${tick} m` : tick}
+              </text>
+            </g>
+          ))}
+          {/* catchment rain */}
+          <text
+            x={CHART_W - CHART_MR}
+            y={CHART_MT - 9}
+            textAnchor="end"
+            fontSize={8}
+            fill="rgb(148 163 184 / 0.8)"
           >
-            {hour}
-          </output>
-          <Slider
-            value={[timeline]}
-            min={0}
-            max={16}
-            step={2}
-            onValueChange={(value) =>
-              setTimeline(typeof value === 'number' ? value : (value[0] ?? 8))
-            }
-            aria-label="Scenario hour"
-            className="[&_[data-slot=slider-range]]:bg-sky-400 [&_[data-slot=slider-thumb]]:size-3.5 [&_[data-slot=slider-thumb]]:border-white [&_[data-slot=slider-thumb]]:bg-sky-400 [&_[data-slot=slider-track]]:h-1 [&_[data-slot=slider-track]]:bg-slate-600"
+            catchment rain, mm/h
+          </text>
+          {forecast.catchmentMeanMmPerHour.map((mm, h) => (
+            <rect
+              key={h}
+              x={x(h) - barWidth / 2}
+              y={rainY(mm)}
+              width={barWidth}
+              height={Math.max(0, baseline - rainY(mm))}
+              fill="rgb(148 163 184 / 0.28)"
+            />
+          ))}
+          {/* river level */}
+          <path d={areaPath} fill="rgb(56 189 248 / 0.22)" />
+          <path
+            d={linePath}
+            fill="none"
+            stroke="rgb(56 189 248)"
+            strokeWidth={2}
+            strokeLinejoin="round"
           />
-        </div>
-        <span className="text-xs font-semibold tabular-nums text-slate-300">
-          H08
-        </span>
+          {/* level right now */}
+          <line
+            x1={CHART_ML}
+            x2={CHART_W - CHART_MR}
+            y1={y(floor)}
+            y2={y(floor)}
+            stroke="rgb(226 232 240 / 0.55)"
+            strokeWidth={1}
+            strokeDasharray="4 4"
+          />
+          <text
+            x={CHART_ML + 4}
+            y={y(floor) - 3}
+            fontSize={8}
+            fill="rgb(226 232 240 / 0.7)"
+          >
+            now
+          </text>
+          {/* peak pin */}
+          <line
+            x1={x(peakHour)}
+            x2={x(peakHour)}
+            y1={y(peakLevel)}
+            y2={baseline}
+            stroke="rgb(252 211 77 / 0.7)"
+            strokeWidth={1}
+            strokeDasharray="2 3"
+          />
+          <rect
+            x={peakTagX}
+            y={peakTagY}
+            width={peakTagWidth}
+            height={14}
+            rx={3}
+            fill="rgb(120 53 15 / 0.85)"
+            stroke="rgb(252 211 77 / 0.5)"
+          />
+          <text
+            x={peakTagX + peakTagWidth / 2}
+            y={peakTagY + 10}
+            textAnchor="middle"
+            fontSize={9}
+            fontWeight={600}
+            fill="rgb(253 230 138)"
+          >
+            Peak · {peakLevel.toFixed(1)} m
+          </text>
+          {/* selected hour */}
+          <line
+            x1={x(hour)}
+            x2={x(hour)}
+            y1={CHART_MT}
+            y2={baseline}
+            stroke="rgb(56 189 248)"
+            strokeWidth={1.5}
+          />
+          <circle
+            cx={x(hour)}
+            cy={y(level)}
+            r={4.5}
+            fill="rgb(56 189 248)"
+            stroke="white"
+            strokeWidth={1.5}
+          />
+          {/* clock times */}
+          {timeLabels.map((h) => (
+            <text
+              key={h}
+              x={x(h)}
+              y={CHART_H - 5}
+              textAnchor={h === 0 ? 'start' : 'middle'}
+              fontSize={9}
+              fill="rgb(148 163 184)"
+            >
+              {h === 0 ? 'Now' : clockLabel(now, h)}
+            </text>
+          ))}
+        </svg>
       </div>
     </aside>
   );
 }
 
-function CoverageVisual() {
-  return (
-    <div className="relative mt-3 h-36 overflow-hidden rounded-xl border border-slate-600/35 bg-[#07141c]">
-      <div className="scan-line absolute inset-x-0 top-0 z-10 h-px bg-gradient-to-r from-transparent via-emerald-300/45 to-transparent" />
-      <div className="absolute inset-x-0 bottom-0 h-[58%] bg-[linear-gradient(160deg,transparent_0_18%,#264736_19%_42%,#18382d_43%_63%,#0e291f_64%)] opacity-85" />
-      <div className="coverage-cone absolute bottom-[28px] left-[42%] h-[92px] w-[155px] -translate-x-1/2 opacity-70" />
-      <div className="absolute bottom-[30px] left-[42%] -translate-x-1/2 text-emerald-200">
-        <RadioTower className="size-8" />
-      </div>
-      <div className="absolute left-3 top-3 flex items-center gap-2 rounded-md border border-emerald-300/20 bg-emerald-300/8 px-2 py-1 text-[10px] font-semibold tracking-[0.1em] text-emerald-200 uppercase">
-        <span className="size-1.5 rounded-full bg-emerald-300" /> LOS service
-        area
-      </div>
-      <div className="absolute bottom-2 right-2 text-[10px] text-slate-500">
-        VISUAL ESTIMATE
-      </div>
-    </div>
-  );
-}
+const waveLegend = [
+  ['bg-emerald-400', 'Open through the peak'],
+  ['bg-amber-400', 'Closes before the peak'],
+  ['bg-rose-400', 'Closes within 2 h'],
+  ['bg-slate-500', 'Unreachable now'],
+] as const;
 
-function MetricCard({
-  icon: Icon,
-  label,
-  value,
+function RouteControls({
+  route,
+  ready,
+  plannedLevel,
+  plannedLabel,
+  onStart,
+  onSkip,
 }: {
-  icon: IconComponent;
-  label: string;
-  value: string;
+  route: RouteState | null;
+  ready: boolean;
+  plannedLevel: number;
+  plannedLabel: string;
+  onStart: () => void;
+  onSkip: () => void;
 }) {
+  const running = route?.status === 'running';
+  const done = route?.status === 'done';
+  const sitesRunning = done && !route.sitesDone;
+  const winner = route?.sitesDone
+    ? (route.sites.find((site) => site.id === route.winnerId) ?? null)
+    : null;
+  const margin = winner ? winner.candidate.handDm / 10 - plannedLevel : 0;
   return (
-    <div className="rounded-xl border border-slate-600/30 bg-slate-900/35 p-3">
-      <div className="flex items-center gap-1.5 text-slate-500">
-        <Icon className="size-3.5" aria-hidden />
-        <p className="text-[10px] font-semibold tracking-[0.1em] uppercase">
-          {label}
-        </p>
-      </div>
-      <p className="mt-2 text-sm font-semibold text-slate-100 tabular-nums">
-        {value}
-      </p>
-    </div>
+    <section className="mt-4">
+      <Button
+        type="button"
+        onClick={onStart}
+        disabled={!ready || route !== null}
+        className="min-h-11 w-full rounded-lg bg-sky-400 text-sm font-semibold text-slate-950 hover:bg-sky-300 disabled:bg-slate-700 disabled:text-slate-300 disabled:opacity-100"
+      >
+        {route?.sitesDone
+          ? 'Sites evaluated'
+          : sitesRunning
+            ? 'Evaluating sites…'
+            : running
+              ? 'Evaluating routes…'
+              : 'Start evaluation'}
+      </Button>
+      {(running || sitesRunning) && (
+        <button
+          type="button"
+          onClick={onSkip}
+          className="mt-2 min-h-10 w-full rounded-lg text-xs font-semibold tracking-[0.06em] text-sky-200 uppercase hover:bg-slate-800 hover:text-white"
+        >
+          Skip animation
+        </button>
+      )}
+      {route && (
+        <div className="mt-3 rounded-xl border border-slate-600/30 bg-slate-900/35 p-3.5">
+          <p className="text-[11px] font-semibold tracking-[0.1em] text-slate-500 uppercase">
+            Reachable network
+          </p>
+          <p
+            className="mt-1 text-lg font-semibold text-white tabular-nums"
+            aria-live="polite"
+          >
+            {route.reachableKm.toFixed(0)} km
+            <span className="mx-2 text-slate-600">·</span>
+            {route.cuts} {route.cuts === 1 ? 'cut' : 'cuts'}
+          </p>
+          <p className="mt-1 text-[11px] text-slate-500">
+            From the Kuala Krai depot at today&rsquo;s level; colours show when the
+            forecast closes each road.
+          </p>
+          <ul className="mt-3 grid grid-cols-2 gap-x-3 gap-y-1.5 text-[11px] text-slate-300">
+            {waveLegend.map(([swatch, label]) => (
+              <li key={label} className="flex items-center gap-1.5">
+                <span className={`size-2.5 rounded-full ${swatch}`} />
+                {label}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {done && !winner && (
+        <div className="mt-3 rounded-xl border border-emerald-300/20 bg-emerald-300/8 p-3.5">
+          <p className="text-[11px] font-semibold tracking-[0.1em] text-emerald-200/75 uppercase">
+            Reachable sites
+          </p>
+          <p
+            className="mt-1 text-lg font-semibold text-white tabular-nums"
+            aria-live="polite"
+          >
+            {route.spawned.length}
+            <span className="text-slate-400"> / {route.sites.length}</span>
+          </p>
+          <p className="mt-1 text-[11px] text-slate-500">
+            Dry high ground within reach of a lit road; each label counts the
+            homes under water at the planned hour that the mast would see.
+          </p>
+        </div>
+      )}
+      {winner && route && (
+        <div className="mt-3 rounded-xl border border-emerald-300/30 bg-emerald-300/10 p-3.5">
+          <p className="text-[11px] font-semibold tracking-[0.12em] text-emerald-300 uppercase">
+            Best site
+          </p>
+          <h3 className="mt-0.5 text-lg font-semibold text-white">
+            {winner.candidate.name}
+          </h3>
+          <p className="mt-2 text-[28px] font-semibold leading-none tracking-[-0.03em] text-emerald-300 tabular-nums">
+            {winner.homesReconnected.toLocaleString()}
+            <span className="ml-1.5 text-sm font-medium text-emerald-100/80">
+              homes reconnected
+            </span>
+          </p>
+          <ul className="mt-3 space-y-1.5 text-xs text-slate-200 tabular-nums">
+            <li>
+              {winner.candidate.handDm >= 254
+                ? 'Well above'
+                : `+${margin.toFixed(1)} m above`}{' '}
+              the planned flood
+            </li>
+            <li>
+              {winner.routeKm.toFixed(1)} km by road from the depot
+              {winner.candidate.nearestRoadM > 0 && (
+                <span className="text-slate-400">
+                  {' '}· then {winner.candidate.nearestRoadM} m off-road
+                </span>
+              )}
+            </li>
+            <li>
+              {winner.candidate.elevation} m elevation · line of sight over{' '}
+              {winner.homesCovered.toLocaleString()} homes in all
+            </li>
+          </ul>
+          <p className="mt-3 inline-flex items-center rounded-full border border-sky-300/25 bg-slate-950/60 px-2.5 py-1 text-[11px] text-slate-200 tabular-nums">
+            Planning for {plannedLabel}
+          </p>
+          <p className="mt-3 text-[11px] text-slate-500">
+            Highest count of cut-off homes among {route.sites.length} reachable
+            sites; ties go to the shorter road. Tap another site on the map to
+            preview its coverage.
+          </p>
+        </div>
+      )}
+      {!ready && (
+        <p className="mt-2 text-[11px] text-slate-500">Loading road network…</p>
+      )}
+    </section>
   );
 }
 
-function InterventionContent({ onClose }: { onClose?: () => void }) {
-  const [council, setCouncil] = useState('Fixed Weighting 1');
-  const [decision, setDecision] = useState<string | null>(null);
+function StageContent({
+  stage,
+  gauge,
+  setGauge,
+  now,
+  route,
+  routesReady,
+  plannedLevel,
+  plannedLabel,
+  onStartRoutes,
+  onSkipRoutes,
+  onNext,
+  onClose,
+}: StageProps & { onClose?: () => void }) {
+  const index = stages.findIndex((entry) => entry.key === stage);
+  const entry = stages[index]!;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex items-center justify-between border-b border-slate-600/35 px-4 py-3.5">
         <div>
           <p className="text-[11px] font-semibold tracking-[0.12em] text-sky-300 uppercase">
-            Candidate 04
+            Step {index + 1} of {stages.length}
           </p>
           <h2 className="mt-0.5 text-base font-semibold text-white">
-            Intervention Analysis
+            {entry.heading}
           </h2>
         </div>
         {onClose && (
@@ -522,7 +1112,7 @@ function InterventionContent({ onClose }: { onClose?: () => void }) {
             variant="ghost"
             size="icon-lg"
             onClick={onClose}
-            aria-label="Close intervention analysis"
+            aria-label="Close panel"
             className="text-slate-400 hover:bg-slate-700/60 hover:text-white"
           >
             <X className="size-4" />
@@ -531,138 +1121,91 @@ function InterventionContent({ onClose }: { onClose?: () => void }) {
       </div>
 
       <div className="scrollbar-thin flex-1 overflow-y-auto px-4 py-4">
-        <div className="grid grid-cols-2 gap-2">
-          <div className="col-span-2 rounded-xl border border-emerald-300/20 bg-emerald-300/8 p-3.5">
-            <div className="flex items-center justify-between">
-              <p className="text-[11px] font-semibold tracking-[0.12em] text-emerald-200/75 uppercase">
-                Reconnected population
-              </p>
-              <Users className="size-4 text-emerald-300" aria-hidden />
-            </div>
-            <div className="mt-1 text-[34px] font-semibold leading-none tracking-[-0.04em] text-emerald-300 tabular-nums">
-              +13,369
-            </div>
-            <p className="mt-1.5 text-xs text-emerald-100/55">
-              Across the Galas valley: Dabong, Manek Urai, Kuala Krai
-            </p>
-          </div>
-          <MetricCard
-            icon={Waves}
-            label="Site flood depth"
-            value="Dry (0.0m)"
+        <p className="text-[13px] leading-5 text-slate-400">{entry.helper}</p>
+        {stage === 'now' && (
+          <GaugeControl
+            gauge={gauge}
+            setGauge={setGauge}
+            now={now}
+            onNext={onNext}
           />
-          <MetricCard
-            icon={CircleDollarSign}
-            label="Est. cost"
-            value="RM 45,000"
-          />
-        </div>
-
-        <CoverageVisual />
-
-        <section className="mt-5">
-          <div className="mb-2.5 flex items-center justify-between">
-            <h3 className="text-xs font-semibold tracking-[0.12em] text-slate-300 uppercase">
-              Decision council
-            </h3>
-            <span className="rounded-md border border-slate-600/40 bg-slate-800/60 px-1.5 py-1 text-[10px] text-slate-400">
-              4 lenses
-            </span>
-          </div>
-          <RadioGroup
-            value={council}
-            onValueChange={setCouncil}
-            aria-label="Decision council weighting"
-            className="gap-1.5"
-          >
-            {councilOptions.map(([name, description], index) => (
-              <label
-                htmlFor={`council-${index}`}
-                key={name}
-                className={`flex min-h-12 cursor-pointer items-center gap-3 rounded-lg border px-3 transition-colors ${council === name ? 'border-sky-300/25 bg-sky-300/8' : 'border-slate-600/25 bg-slate-900/20 hover:bg-slate-700/30'}`}
-              >
-                <RadioGroupItem
-                  id={`council-${index}`}
-                  value={name}
-                  className="border-slate-500 data-checked:border-sky-300 data-checked:bg-sky-400"
-                />
-                <span className="min-w-0 flex-1">
-                  <span className="block text-sm font-medium text-slate-100">
-                    {name}
-                  </span>
-                  <span className="block text-[11px] text-slate-500">
-                    {description}
-                  </span>
-                </span>
-                <span
-                  title={`${name}: ${description}`}
-                  className="grid size-7 place-items-center text-slate-500"
-                  aria-label={`About ${name}`}
-                >
-                  <Info className="size-3.5" aria-hidden />
-                </span>
-              </label>
-            ))}
-          </RadioGroup>
-        </section>
-
-        <section className="mt-5 rounded-xl border border-slate-600/30 bg-slate-900/35 p-3.5">
-          <div className="flex items-center gap-2">
-            <ShieldCheck className="size-4 text-sky-300" aria-hidden />
-            <h3 className="text-xs font-semibold tracking-[0.12em] text-slate-300 uppercase">
-              Oversight log
-            </h3>
-          </div>
-          <p className="mt-2 text-[13px] leading-5 text-slate-400">
-            Final placement remains with the response officer. This concept
-            records no decision and submits no operational data.
-          </p>
-        </section>
-      </div>
-
-      <div className="border-t border-slate-600/35 bg-slate-950/25 p-3">
-        {decision && (
-          <p
-            className="mb-2 flex items-center gap-2 rounded-lg border border-slate-600/30 bg-slate-800/55 px-2.5 py-2 text-xs text-slate-300"
-            aria-live="polite"
-          >
-            <Check className="size-3.5 text-sky-300" aria-hidden />
-            Preview marked: {decision}. Nothing was submitted.
+        )}
+        {stage === 'forecast' && (
+          <p className="mt-3 rounded-lg border border-slate-600/30 bg-slate-900/35 px-3 py-2.5 text-xs leading-5 text-slate-300">
+            Drag along the river forecast at the bottom of the map to pick the
+            hour, then press <span className="font-semibold text-white">Plan for the peak</span>.
           </p>
         )}
-        <div className="grid grid-cols-3 gap-2">
-          <button
-            type="button"
-            onClick={() => setDecision('Accepted')}
-            className="min-h-10 rounded-lg bg-emerald-500 px-2 text-xs font-bold tracking-[0.04em] text-white transition-colors hover:bg-emerald-400"
-          >
-            ACCEPT
-          </button>
-          <button
-            type="button"
-            onClick={() => setDecision('Modify')}
-            className="min-h-10 rounded-lg border border-slate-500/45 bg-slate-700/75 px-2 text-xs font-bold tracking-[0.04em] text-white transition-colors hover:bg-slate-600"
-          >
-            MODIFY
-          </button>
-          <button
-            type="button"
-            onClick={() => setDecision('Rejected')}
-            className="min-h-10 rounded-lg bg-red-500 px-2 text-xs font-bold tracking-[0.04em] text-white transition-colors hover:bg-red-400"
-          >
-            REJECT
-          </button>
-        </div>
+        {stage === 'site' && (
+          <RouteControls
+            route={route}
+            ready={routesReady}
+            plannedLevel={plannedLevel}
+            plannedLabel={plannedLabel}
+            onStart={onStartRoutes}
+            onSkip={onSkipRoutes}
+          />
+        )}
       </div>
     </div>
   );
 }
 
+type RouteState = {
+  id: number;
+  evaluation: RouteEvaluation;
+  status: 'running' | 'done';
+  skip: boolean;
+  /** Live figures while the wave plays. */
+  reachableKm: number;
+  cuts: number;
+  /** Reachable candidates in spawn order. */
+  sites: SiteAssessment[];
+  /** Candidate ids the scene has spawned so far. */
+  spawned: string[];
+  sitesDone: boolean;
+  /** Decided at Start; revealed once every site has spawned. */
+  winnerId: string | null;
+  /** Runner-up being previewed on the map. */
+  previewId: string | null;
+};
+
+/** Highest homes reconnected wins; a tie goes to the shorter road. */
+function pickWinner(sites: SiteAssessment[]) {
+  let best: SiteAssessment | null = null;
+  for (const site of sites) {
+    if (
+      !best ||
+      site.homesReconnected > best.homesReconnected ||
+      (site.homesReconnected === best.homesReconnected && site.routeKm < best.routeKm)
+    ) {
+      best = site;
+    }
+  }
+  return best?.id ?? null;
+}
+
+type StageProps = {
+  stage: Stage;
+  gauge: number;
+  setGauge: (value: number) => void;
+  /** Minute-resolution epoch ms, or null before the browser clock is known. */
+  now: number | null;
+  route: RouteState | null;
+  routesReady: boolean;
+  plannedLevel: number;
+  plannedLabel: string;
+  onStartRoutes: () => void;
+  onSkipRoutes: () => void;
+  onNext: () => void;
+};
+
 function InterventionPanel({
   open,
   onClose,
   onOpen,
-}: {
+  ...stageProps
+}: StageProps & {
   open: boolean;
   onClose: () => void;
   onOpen: () => void;
@@ -675,14 +1218,14 @@ function InterventionPanel({
         className="glass-panel absolute right-6 top-20 z-30 hidden min-h-11 items-center gap-2 rounded-xl px-3.5 text-sm font-medium text-white hover:border-sky-300/35 md:flex"
       >
         <ShieldCheck className="size-4 text-sky-300" aria-hidden />
-        Open analysis
+        Open panel
       </button>
     );
   }
 
   return (
     <aside className="glass-panel absolute bottom-6 right-6 top-20 z-30 hidden w-80 overflow-hidden rounded-xl md:flex">
-      <InterventionContent onClose={onClose} />
+      <StageContent {...stageProps} onClose={onClose} />
     </aside>
   );
 }
@@ -744,42 +1287,11 @@ function MobileControls({
   );
 }
 
-function MobileTimeline({
-  timeline,
-  setTimeline,
-}: {
-  timeline: number;
-  setTimeline: (value: number) => void;
-}) {
-  return (
-    <div className="glass-panel absolute inset-x-3 bottom-[72px] z-30 rounded-xl px-3 py-2.5 md:hidden">
-      <div className="flex items-center gap-3">
-        <span className="text-[10px] font-bold tracking-[0.08em] text-sky-200 uppercase">
-          HAND
-        </span>
-        <Slider
-          value={[timeline]}
-          min={0}
-          max={16}
-          step={2}
-          onValueChange={(value) =>
-            setTimeline(typeof value === 'number' ? value : (value[0] ?? 8))
-          }
-          aria-label="Scenario hour"
-          className="flex-1 [&_[data-slot=slider-range]]:bg-sky-400 [&_[data-slot=slider-thumb]]:border-white [&_[data-slot=slider-thumb]]:bg-sky-400 [&_[data-slot=slider-track]]:bg-slate-600"
-        />
-        <span className="w-8 text-right text-xs font-semibold tabular-nums text-white">
-          H{String(timeline).padStart(2, '0')}
-        </span>
-      </div>
-    </div>
-  );
-}
-
 function MobileAnalysis({
   open,
   onClose,
-}: {
+  ...stageProps
+}: StageProps & {
   open: boolean;
   onClose: () => void;
 }) {
@@ -789,11 +1301,18 @@ function MobileAnalysis({
     <dialog
       open
       className="fixed inset-0 z-[60] m-0 flex size-full max-h-none max-w-none items-end border-0 bg-black/40 p-0 backdrop-blur-[2px] md:hidden"
-      aria-label="Intervention analysis"
+      aria-label="Stage panel"
     >
       <div className="glass-panel flex max-h-[84dvh] w-full flex-col overflow-hidden rounded-t-2xl border-x-0 border-b-0">
         <div className="mx-auto mt-2 h-1 w-10 rounded-full bg-slate-600" />
-        <InterventionContent onClose={onClose} />
+        <StageContent
+          {...stageProps}
+          onNext={() => {
+            stageProps.onNext();
+            onClose();
+          }}
+          onClose={onClose}
+        />
       </div>
     </dialog>
   );
@@ -807,8 +1326,14 @@ export function ResilinetDashboard() {
     roads: true,
     population: true,
   });
-  const [timeline, setTimeline] = useState(8);
-  const [playing, setPlaying] = useState(false);
+  const [stage, setStage] = useState<Stage>('now');
+  const [gauge, setGauge] = useState(GAUGE_DEFAULT);
+  const [forecast, setForecast] = useState<Forecast | null>(null);
+  // The same baked assets the scene uses; needed here for routing and sites.
+  const [terrain, setTerrain] = useState<TerrainData | null>(null);
+  const [route, setRoute] = useState<RouteState | null>(null);
+  // null until the officer picks an hour; the curve's peak is the default.
+  const [chosenHour, setChosenHour] = useState<number | null>(null);
   const [analysisOpen, setAnalysisOpen] = useState(true);
   const [resetSignal, setResetSignal] = useState(0);
   const [mobileAnalysisOpen, setMobileAnalysisOpen] = useState(false);
@@ -817,42 +1342,228 @@ export function ResilinetDashboard() {
     setLayers((current) => ({ ...current, [key]: value }));
   };
 
+  useEffect(() => {
+    let cancelled = false;
+    terrainResource().then(
+      (data) => {
+        if (!cancelled) setTerrain(data);
+      },
+      (error: unknown) => console.error('Failed to load terrain', error),
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    loadForecast().then(
+      (data) => {
+        if (!cancelled) setForecast(data);
+      },
+      (error: unknown) => console.error('Failed to load forecast', error),
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // The river-level curve starts from the observed gauge reading.
+  const curve = useMemo(
+    () => (forecast ? floodCurve(forecast, gaugeToHandLevel(gauge)) : null),
+    [forecast, gauge],
+  );
+  const forecastHour = chosenHour ?? curve?.peakHour() ?? 0;
+
+  const now = useClock();
+  // Now floods from the gauge; Forecast and Site from the curve at the chosen
+  // hour (falling back to the gauge if the forecast file is unavailable).
+  const plannedLevel = curve ? curve.levelAt(forecastHour) : gaugeToHandLevel(gauge);
+  const level = stage === 'now' ? gaugeToHandLevel(gauge) : plannedLevel;
+  const plannedLabel = `${clockLabel(now, forecastHour)} (+${forecastHour.toFixed(0)} h) · ${plannedLevel.toFixed(1)} m`;
+  // The forecast is read from above; every other stage is on the ground.
+  // Now: the home oblique. Forecast: top-down. Site: from behind the depot,
+  // so the route wave starts in the foreground and runs away down the valley.
+  const view: View =
+    stage === 'forecast' ? 'overview' : stage === 'site' ? 'site' : 'ground';
+  // Leaving the site stage discards its route evaluation.
+  const changeStage = (next: Stage) => {
+    if (next !== 'site') setRoute(null);
+    setStage(next);
+  };
+  const onNext = () => changeStage(stage === 'now' ? 'forecast' : 'site');
+
+  const routesReady = terrain !== null && curve !== null;
+  const onStartRoutes = () => {
+    if (!terrain || !curve) return;
+    const evaluation = evaluateRoutes(
+      terrain.graph,
+      terrain.meta.depot.node,
+      gaugeToHandLevel(gauge),
+      curve.levels,
+      curve.peakHour(),
+    );
+    const sites = assessSites(
+      terrain,
+      evaluation.distanceByNode,
+      curve.levelAt(forecastHour),
+    );
+    // For checking against the labels on the map.
+    console.table(
+      sites.map((site) => ({
+        candidate: site.candidate.name,
+        'route km': Number(site.routeKm.toFixed(1)),
+        'homes reconnected': site.homesReconnected,
+        'homes covered': site.homesCovered,
+      })),
+    );
+    setRoute((current) => ({
+      id: (current?.id ?? 0) + 1,
+      evaluation,
+      status: 'running',
+      skip: false,
+      reachableKm: 0,
+      cuts: 0,
+      sites,
+      spawned: [],
+      sitesDone: false,
+      winnerId: pickWinner(sites),
+      previewId: null,
+    }));
+  };
+  const onSkipRoutes = () =>
+    setRoute((current) => (current ? { ...current, skip: true } : current));
+  const onRouteProgress = useCallback(
+    (state: { reachableKm: number; cuts: number }) =>
+      setRoute((current) =>
+        current && (current.reachableKm !== state.reachableKm || current.cuts !== state.cuts)
+          ? { ...current, ...state }
+          : current,
+      ),
+    [],
+  );
+  const onRouteDone = useCallback(
+    () =>
+      setRoute((current) =>
+        current && current.status !== 'done' ? { ...current, status: 'done' } : current,
+      ),
+    [],
+  );
+  const onSiteSpawn = useCallback(
+    (id: string) =>
+      setRoute((current) =>
+        current && !current.spawned.includes(id)
+          ? { ...current, spawned: [...current.spawned, id] }
+          : current,
+      ),
+    [],
+  );
+  const onSitesDone = useCallback(
+    () =>
+      setRoute((current) =>
+        current && !current.sitesDone ? { ...current, sitesDone: true } : current,
+      ),
+    [],
+  );
+  const onPreview = useCallback(
+    (id: string) =>
+      setRoute((current) =>
+        current ? { ...current, previewId: current.previewId === id ? null : id } : current,
+      ),
+    [],
+  );
+  const routeRun: RouteRun | null = useMemo(
+    () =>
+      route
+        ? { id: route.id, evaluation: route.evaluation, sites: route.sites, skip: route.skip }
+        : null,
+    [route],
+  );
+  const spawnedIds = route?.spawned ?? [];
+
+  const stageProps: StageProps = {
+    stage,
+    gauge,
+    setGauge,
+    now,
+    route,
+    routesReady,
+    plannedLevel,
+    plannedLabel,
+    onStartRoutes,
+    onSkipRoutes,
+    onNext,
+  };
+
   return (
     <main className="relative h-[100dvh] w-screen overflow-hidden bg-slate-900 text-slate-100">
       <TerrainStage
         layers={layers}
-        timeline={timeline}
+        level={level}
+        view={view}
+        forecast={forecast}
+        forecastHour={forecastHour}
+        routeRun={routeRun}
+        onRouteProgress={onRouteProgress}
+        onRouteDone={onRouteDone}
+        spawnedIds={spawnedIds}
+        onSiteSpawn={onSiteSpawn}
+        onSitesDone={onSitesDone}
+        winnerId={route?.sitesDone ? route.winnerId : null}
+        previewId={route?.previewId ?? null}
+        onPreview={onPreview}
         resetSignal={resetSignal}
       />
-      <TopBar />
+      <TopBar stage={stage} setStage={changeStage} />
       <UtilityRail />
       <LayerPanel layers={layers} onLayerChange={onLayerChange} />
-      <TimelinePanel
-        timeline={timeline}
-        setTimeline={setTimeline}
-        playing={playing}
-        setPlaying={setPlaying}
-      />
+      {stage === 'forecast' && forecast && curve && (
+        <ForecastTimeline
+          forecast={forecast}
+          curve={curve}
+          hour={forecastHour}
+          setHour={setChosenHour}
+          now={now}
+          floor={gaugeToHandLevel(gauge)}
+          onNext={onNext}
+        />
+      )}
+      {stage === 'site' && curve && (
+        <div className="absolute left-1/2 top-[124px] z-20 flex -translate-x-1/2 items-center gap-2 rounded-full border border-sky-300/25 bg-slate-950/70 py-1.5 pl-3.5 pr-1.5 text-xs text-slate-100 backdrop-blur-md md:top-20">
+          <span className="tabular-nums">
+            Planning for{' '}
+            <span className="font-semibold text-white">
+              {clockLabel(now, forecastHour)}
+            </span>{' '}
+            <span className="text-slate-400">(+{forecastHour.toFixed(0)} h)</span>
+            <span className="mx-1.5 text-slate-500">·</span>
+            <span className="font-semibold text-white">
+              {curve.levelAt(forecastHour).toFixed(1)} m
+            </span>
+          </span>
+          <button
+            type="button"
+            onClick={() => changeStage('forecast')}
+            className="min-h-8 rounded-full px-2.5 text-[11px] font-semibold tracking-[0.06em] text-sky-200 uppercase hover:bg-slate-800 hover:text-white"
+          >
+            Change
+          </button>
+        </div>
+      )}
       <InterventionPanel
+        {...stageProps}
         open={analysisOpen}
         onClose={() => setAnalysisOpen(false)}
         onOpen={() => setAnalysisOpen(true)}
       />
       <MobileControls layers={layers} onLayerChange={onLayerChange} />
-      <MobileTimeline timeline={timeline} setTimeline={setTimeline} />
       <MobileDock onOpenAnalysis={() => setMobileAnalysisOpen(true)} />
       <MobileAnalysis
+        {...stageProps}
         open={mobileAnalysisOpen}
         onClose={() => setMobileAnalysisOpen(false)}
       />
 
-      <div className="absolute right-[362px] top-20 z-20 hidden rounded-lg border border-white/15 bg-slate-950/55 px-2.5 py-2 text-[11px] text-slate-200 backdrop-blur-md xl:flex">
-        <Satellite
-          className="mr-1.5 inline size-3.5 text-sky-300"
-          aria-hidden
-        />
-        NASA SRTM · Sentinel-2
-      </div>
       <div className="absolute bottom-6 right-[362px] z-20 hidden items-center gap-2 xl:flex">
         <span className="hidden text-[10px] font-medium tracking-[0.06em] text-white/55 uppercase 2xl:block">
           Drag to pan · pinch to zoom · two fingers up/down to fly · left/right to orbit
@@ -860,7 +1571,11 @@ export function ResilinetDashboard() {
         <button
           type="button"
           aria-label="Reset map view"
-          onClick={() => setResetSignal((value) => value + 1)}
+          onClick={() => {
+            // Reset returns to the ground view, so the flow returns to Now.
+            changeStage('now');
+            setResetSignal((value) => value + 1);
+          }}
           className="grid size-10 place-items-center rounded-xl border border-white/15 bg-slate-950/65 text-slate-300 backdrop-blur-md hover:bg-slate-800 hover:text-white"
         >
           <RotateCcw className="size-4" aria-hidden />

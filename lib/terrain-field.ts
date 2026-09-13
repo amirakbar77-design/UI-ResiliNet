@@ -20,6 +20,46 @@ export type RoadWay = {
   points: [number, number][];
 };
 
+/** One stretch of road or rail between two junctions of the baked graph. */
+export type RoadEdge = RoadWay & {
+  /** Indices into RoadGraph.nodes. */
+  a: number;
+  b: number;
+  /** OSM bridge=yes on the way; the deck sits above the river. */
+  bridge: boolean;
+  km: number;
+  /** Minimum HAND along the edge, decimetres; 255 = dry. */
+  handDm: number;
+  /** HAND in decimetres every ~30 m along the drawn polyline. */
+  profile: number[];
+  /** Profile index of each drawn point; segment k spans offsets[k]..offsets[k+1]. */
+  offsets: number[];
+};
+
+export type RoadGraph = {
+  nodes: [number, number][];
+  edges: RoadEdge[];
+};
+
+export type Depot = {
+  lon: number;
+  lat: number;
+  /** Graph node the depot is snapped to. */
+  node: number;
+  name: string;
+};
+
+export type Candidate = {
+  lon: number;
+  lat: number;
+  elevation: number;
+  handDm: number;
+  name: string;
+  /** Graph node where a route to this site ends. */
+  roadNode: number;
+  nearestRoadM: number;
+};
+
 export type Place = {
   name: string;
   lon: number;
@@ -40,8 +80,11 @@ export type TerrainMeta = {
   elevation: { min: number; max: number };
   hand: { dryValue: number };
   texture: { file: string; size: number };
-  roads: RoadWay[];
+  roads: { file: string; nodes: number; edges: number };
   places: Place[];
+  depot: Depot;
+  /** Best first; towerSite is candidates[0]. */
+  candidates: Candidate[];
   towerSite: TowerSite;
   houses: { file: string; count: number };
   attribution: string[];
@@ -56,6 +99,8 @@ export type TerrainData = {
   surface: ImageBitmap;
   /** [lon, lat, heading] triplets: OSM buildings plus illustrative homes. */
   houses: Float32Array;
+  /** Road + rail graph; its edges are also the drawn road geometry. */
+  graph: RoadGraph;
   width: number;
   height: number;
 };
@@ -73,15 +118,6 @@ export function clamp(value: number, min: number, max: number) {
 export function smoothstep(edge0: number, edge1: number, value: number) {
   const t = clamp((value - edge0) / (edge1 - edge0), 0, 1);
   return t * t * (3 - 2 * t);
-}
-
-/**
- * Scenario hour to a HAND threshold in metres, matching the legend's range.
- * Runs 0.5 → 14 m: the Galas rose roughly 18 m at Dabong in December 2014,
- * and the baked HAND raster caps at 25.4 m.
- */
-export function floodLevelForHour(hour: number) {
-  return 0.5 + (clamp(hour, 0, 16) / 16) * 13.5;
 }
 
 export const mercatorX = (lon: number) => lon / 360 + 0.5;
@@ -157,6 +193,13 @@ async function loadBinary(url: string) {
   return response.arrayBuffer();
 }
 
+async function loadJson<T>(url: string) {
+  const response = await fetch(url);
+  if (!response.ok)
+    throw new Error(`Failed to load ${url}: ${response.status}`);
+  return (await response.json()) as T;
+}
+
 async function loadImageBitmap(url: string) {
   const response = await fetch(url);
   if (!response.ok)
@@ -170,18 +213,21 @@ export async function loadTerrain(base = '/terrain'): Promise<TerrainData> {
     throw new Error(`Failed to load terrain metadata: ${metaResponse.status}`);
   }
   const meta = (await metaResponse.json()) as TerrainMeta;
-  const [elevationBuffer, handBuffer, houseBuffer, surface] = await Promise.all([
-    loadBinary(`${base}/elevation.bin`),
-    loadBinary(`${base}/hand.bin`),
-    loadBinary(`${base}/${meta.houses.file}`),
-    loadImageBitmap(`${base}/${meta.texture.file}`),
-  ]);
+  const [elevationBuffer, handBuffer, houseBuffer, graph, surface] =
+    await Promise.all([
+      loadBinary(`${base}/elevation.bin`),
+      loadBinary(`${base}/hand.bin`),
+      loadBinary(`${base}/${meta.houses.file}`),
+      loadJson<RoadGraph>(`${base}/${meta.roads.file}`),
+      loadImageBitmap(`${base}/${meta.texture.file}`),
+    ]);
 
   return {
     meta,
     elevation: new Int16Array(elevationBuffer),
     hand: new Uint8Array(handBuffer),
     houses: new Float32Array(houseBuffer),
+    graph,
     surface,
     width: meta.grid.width,
     height: meta.grid.height,

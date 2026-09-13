@@ -1,14 +1,18 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { MapPin, RadioTower, TriangleAlert } from 'lucide-react';
+import { MapPin, RadioTower, Warehouse } from 'lucide-react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+
+import { type Forecast, rainAt } from '@/lib/forecast';
+import { cutMask, type RouteEvaluation } from '@/lib/routing';
+import type { SiteAssessment } from '@/lib/sites';
+import { viewshedMask, type ViewshedMask } from '@/lib/viewshed';
 
 import {
   clamp,
   elevationToWorldY,
-  floodLevelForHour,
   HAND_DRY,
   type LayerKey,
   lonLatToWorld,
@@ -31,6 +35,20 @@ const SWIPE_ORBIT_RATE = 0.0035; // radians of azimuth per horizontal wheel pixe
 const SWIPE_FLY_RATE = 0.0025; // fraction of camera height per vertical wheel pixel
 const GESTURE_EASE_SECONDS = 0.12;
 const FRAME_SAMPLE = 40;
+const FLIGHT_SECONDS = 1.2;
+const SUN_GROUND = 0.85;
+const SUN_OVERVIEW = 0.2; // flat, map-like shading when looking straight down
+const RAIN_CANVAS_WIDTH = 512;
+const RAIN_CANVAS_HEIGHT = 448;
+const RAIN_PLANE_LIFT_METRES = 400; // above the highest terrain
+const RAIN_STORM_MM = 40; // ≥ this reads as a storm core
+const WAVE_DURATION_MS = 9000;
+const WAVE_HOT_KM = 2.5; // the leading edge glows white-hot for this far behind the front
+const GLOW_WIDTH_FACTOR = 3; // neon halo width relative to the road ribbon
+const SPAWN_INTERVAL_MS = 500; // gap between candidate rings appearing
+const SPAWN_RING_MS = 450; // ring grow-in
+const SPAWN_PULSE_MS = 1100; // coverage fan flash
+const WAVE_SOON_HOURS = 2; // lit roads closing within this read red; those closing before the peak amber
 const MAX_PLACE_MARKERS = 4;
 // Homes are drawn about three times their true footprint so a kampung still
 // reads as a cluster from the valley-wide opening view.
@@ -40,7 +58,7 @@ const HOME_COUNT_RADIUS_METRES = 1200;
 
 type Anchor = {
   id: string;
-  kind: 'tower' | 'population';
+  kind: 'tower' | 'population' | 'depot' | 'candidate';
   label: string;
   detail: string;
   lon: number;
@@ -48,15 +66,43 @@ type Anchor = {
   liftMetres: number;
 };
 
-type StatusElements = {
-  severed: HTMLElement | null;
-  area: HTMLElement | null;
-  homes: HTMLElement | null;
-};
+/** ground = home oblique; overview = top-down; site = behind the depot looking down the valley. */
+export type View = 'ground' | 'overview' | 'site';
 
 type SceneHandle = {
   setLayers: (layers: Record<LayerKey, boolean>) => void;
-  setHour: (hour: number) => void;
+  /** Tweens the camera to the oblique home view or a top-down overview. */
+  flyTo: (view: View) => void;
+  /** Supplies the hourly rain grid drawn over the terrain in the overview. */
+  setForecast: (forecast: Forecast) => void;
+  /** Fractional forecast hour to draw; interpolates between the two nearest hours. */
+  setForecastHour: (hour: number) => void;
+  /** Sets the HAND flood threshold in metres above the drainage datum. */
+  setLevel: (metres: number) => void;
+  /** Impact totals for the current flood level, recomputed by setLevel. */
+  metrics: () => { severedKm: number; floodedKm2: number; homesFlooded: number };
+  /**
+   * Animates the reachable network outward from the depot, then spawns the
+   * reachable candidate sites one by one.
+   */
+  playRouteWave: (
+    evaluation: RouteEvaluation,
+    sites: SiteAssessment[],
+    callbacks: {
+      onProgress: (state: { reachableKm: number; cuts: number }) => void;
+      onDone: () => void;
+      onSiteSpawn: (id: string) => void;
+      onSitesDone: () => void;
+    },
+  ) => void;
+  /** Jumps a running wave to its final state. */
+  finishRouteWave: () => void;
+  /** Raises the mast and permanent coverage at the winning site and glides to it. */
+  showWinner: (site: SiteAssessment | null) => void;
+  /** Previews another candidate's coverage without changing the winner. */
+  previewSite: (site: SiteAssessment | null) => void;
+  /** Removes the wave and returns the roads to flood colouring. */
+  clearRouteWave: () => void;
   resetView: () => void;
   dispose: () => void;
 };
@@ -107,6 +153,26 @@ function deriveAnchors(terrain: TerrainData): Anchor[] {
       lat: meta.towerSite.lat,
       liftMetres: TOWER_MAST_METRES + 30,
     },
+    {
+      id: 'depot',
+      kind: 'depot',
+      label: `Depot · ${meta.depot.name}`,
+      detail: 'Route origin',
+      lon: meta.depot.lon,
+      lat: meta.depot.lat,
+      liftMetres: 40,
+    },
+    // Every candidate has an anchor so its marker can appear the moment the
+    // site evaluation reaches it; the React side only mounts spawned ones.
+    ...meta.candidates.map((candidate, index) => ({
+      id: `candidate-${index}`,
+      kind: 'candidate' as const,
+      label: candidate.name,
+      detail: `${candidate.elevation} m`,
+      lon: candidate.lon,
+      lat: candidate.lat,
+      liftMetres: 30,
+    })),
   ];
 
   const chosen: typeof scored = [];
@@ -142,8 +208,7 @@ function createScene(
   terrain: TerrainData,
   anchors: Anchor[],
   markerElements: Map<string, HTMLDivElement>,
-  status: StatusElements,
-  initialHour: number,
+  initialLevel: number,
 ): SceneHandle {
   const { meta, elevation, hand, width, height } = terrain;
   const g = sceneGrid(meta);
@@ -156,6 +221,8 @@ function createScene(
     powerPreference: 'high-performance',
   });
   renderer.setPixelRatio(Math.min(deviceRatio, 1.5));
+  // Shows around the tile in the overview, where the sky is switched off.
+  renderer.setClearColor(0x07111b, 1);
   renderer.setSize(container.clientWidth, container.clientHeight, false);
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.domElement.style.width = '100%';
@@ -165,7 +232,8 @@ function createScene(
   container.appendChild(renderer.domElement);
 
   const scene = new THREE.Scene();
-  scene.fog = new THREE.Fog(0xd3e2ee, 420, 1500);
+  const fog = new THREE.Fog(0xd3e2ee, 420, 1500);
+  scene.fog = fog;
 
   const skyCanvas = document.createElement('canvas');
   skyCanvas.width = 8;
@@ -213,7 +281,7 @@ function createScene(
   // lights mostly lift it and add just enough directional shaping for relief.
   scene.add(new THREE.AmbientLight(0xffffff, 1.1));
   scene.add(new THREE.HemisphereLight(0xcfe4f3, 0x3b4433, 0.45));
-  const sun = new THREE.DirectionalLight(0xfff4e4, 0.85);
+  const sun = new THREE.DirectionalLight(0xfff4e4, SUN_GROUND);
   sun.position.set(-400, 520, 260);
   scene.add(sun);
 
@@ -359,8 +427,7 @@ function createScene(
   const cellAreaKm2 = meta.grid.spacingMetres ** 2 / 1_000_000;
   let floodedKm2 = 0;
 
-  const buildFlood = (hour: number) => {
-    const level = floodLevelForHour(hour);
+  const buildFlood = (level: number) => {
     floodIndexMap.fill(-1);
     let wetCells = 0;
     for (let index = 0; index < vertexCount; index += 1) {
@@ -442,21 +509,34 @@ function createScene(
   // The railway reads as steel so it is not mistaken for another road.
   const railColor = new THREE.Color('#b8c2cc');
   const severedColor = new THREE.Color('#fb4a45');
-  const roadSegments: {
-    hand: number;
+  // Whether a drawn segment is under water comes from the shared cut rule in
+  // lib/routing (bridge decks, culverts, minimum run length), so what the
+  // map paints red is exactly what the router refuses to drive through.
+  type RoadSegment = {
+    edge: number;
+    sampleStart: number;
+    sampleEnd: number;
     start: number;
     km: number;
+    /** Kilometres along the edge before this segment, from the a end. */
+    alongKm: number;
     intact: THREE.Color;
-  }[] = [];
+  };
+  const roadSegments: RoadSegment[] = [];
   const roadVertices: number[] = [];
   const roadColors: number[] = [];
   const roadIndices: number[] = [];
+  // A wider, additively blended twin of every ribbon: invisible until the
+  // route wave lights a road, then a neon halo around it.
+  const glowVertices: number[] = [];
+  const glowColors: number[] = [];
 
-  for (const way of meta.roads) {
+  for (const [edgeIndex, way] of terrain.graph.edges.entries()) {
     const rail = way.klass === 'rail';
     const major = way.klass === 'motorway' || way.klass === 'trunk';
     const halfWidth = (rail ? 18 : major ? 34 : 24) * SCENE_SCALE;
     const intact = rail ? railColor : intactColor;
+    let alongKm = 0;
     for (let i = 0; i < way.points.length - 1; i += 1) {
       const [lon0, lat0] = way.points[i]!;
       const [lon1, lat1] = way.points[i + 1]!;
@@ -482,14 +562,25 @@ function createScene(
           point.z + normal.y * side,
         );
         roadColors.push(intact.r, intact.g, intact.b, 0.42);
+        glowVertices.push(
+          point.x + normal.x * side * GLOW_WIDTH_FACTOR,
+          point.y - 0.02,
+          point.z + normal.y * side * GLOW_WIDTH_FACTOR,
+        );
+        glowColors.push(intact.r, intact.g, intact.b, 0);
       }
       roadIndices.push(base, base + 2, base + 1, base + 1, base + 2, base + 3);
+      const km = start.distanceTo(end) / SCENE_SCALE / 1000;
       roadSegments.push({
-        hand: Math.min(handAt(lon0, lat0), handAt(lon1, lat1)),
+        edge: edgeIndex,
+        sampleStart: way.offsets[i] ?? 0,
+        sampleEnd: way.offsets[i + 1] ?? way.profile.length - 1,
         start: base,
-        km: start.distanceTo(end) / SCENE_SCALE / 1000,
+        km,
+        alongKm,
         intact,
       });
+      alongKm += km;
     }
   }
 
@@ -511,16 +602,67 @@ function createScene(
     }),
   );
   roadMesh.renderOrder = 2;
+  const glowGeometry = new THREE.BufferGeometry();
+  glowGeometry.setAttribute(
+    'position',
+    new THREE.Float32BufferAttribute(glowVertices, 3),
+  );
+  const glowColorAttribute = new THREE.Float32BufferAttribute(glowColors, 4);
+  glowGeometry.setAttribute('color', glowColorAttribute);
+  glowGeometry.setIndex(roadIndices);
+  const glowMesh = new THREE.Mesh(
+    glowGeometry,
+    new THREE.MeshBasicMaterial({
+      vertexColors: true,
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide,
+    }),
+  );
+  glowMesh.renderOrder = 1.5;
+  roadGroup.add(glowMesh);
   roadGroup.add(roadMesh);
 
   let severedKm = 0;
+  let lastLevel = initialLevel;
 
-  const paintRoads = (hour: number) => {
-    const level = floodLevelForHour(hour);
+  const paintSegment = (
+    array: Float32Array,
+    segment: RoadSegment,
+    tint: THREE.Color,
+    alpha: number,
+    glowAlpha = 0,
+  ) => {
+    const glow = glowColorAttribute.array as Float32Array;
+    for (let corner = 0; corner < 4; corner += 1) {
+      const offset = (segment.start + corner) * 4;
+      array[offset] = tint.r;
+      array[offset + 1] = tint.g;
+      array[offset + 2] = tint.b;
+      array[offset + 3] = alpha;
+      glow[offset] = tint.r;
+      glow[offset + 1] = tint.g;
+      glow[offset + 2] = tint.b;
+      glow[offset + 3] = glowAlpha;
+    }
+  };
+
+  const paintRoads = (level: number) => {
+    lastLevel = level;
+    if (wave) return; // the route wave owns the road colours while it shows
     const array = roadColorAttribute.array as Float32Array;
     severedKm = 0;
+    const masks = terrain.graph.edges.map((edge) => cutMask(edge, level));
     for (const segment of roadSegments) {
-      const severed = segment.hand !== HAND_DRY && segment.hand / 10 < level;
+      const mask = masks[segment.edge]!;
+      let severed = false;
+      for (let s = segment.sampleStart; s <= segment.sampleEnd; s += 1) {
+        if (mask[s]) {
+          severed = true;
+          break;
+        }
+      }
       if (severed) severedKm += segment.km;
       const tint = severed ? severedColor : segment.intact;
       const alpha = severed ? 0.95 : 0.42;
@@ -533,6 +675,243 @@ function createScene(
       }
     }
     roadColorAttribute.needsUpdate = true;
+    glowColorAttribute.needsUpdate = true;
+  };
+
+  // --- Route wave: how far the truck gets, and for how long -------------
+  // Roads light up in order of route distance from the depot; each lit road
+  // is tinted by when the forecast closes it. Roads the truck cannot reach
+  // now stay dim, and every crossing that stops the wave gets a red mark at
+  // the water's edge.
+  type Wave = {
+    evaluation: RouteEvaluation;
+    startedAt: number;
+    progressKm: number;
+    done: boolean;
+    onProgress: (state: { reachableKm: number; cuts: number }) => void;
+    onDone: () => void;
+    /** Candidate sites to spawn once the wave settles. */
+    sites: SiteAssessment[];
+    onSiteSpawn: (id: string) => void;
+    onSitesDone: () => void;
+  };
+  let wave: Wave | null = null;
+
+  // --- Candidate spawn: rings beside the lit roads, one every half second --
+  type Spawn = {
+    sites: SiteAssessment[];
+    next: number;
+    nextAt: number;
+    active: { ring: THREE.Mesh; fan: THREE.Mesh; bornAt: number }[];
+    done: boolean;
+    onSiteSpawn: (id: string) => void;
+    onSitesDone: () => void;
+  };
+  let spawn: Spawn | null = null;
+  const spawnGroup = new THREE.Group();
+  scene.add(spawnGroup);
+  const ringGeometry = new THREE.RingGeometry(
+    90 * SCENE_SCALE,
+    140 * SCENE_SCALE,
+    40,
+  );
+  const ringMaterial = new THREE.MeshBasicMaterial({
+    color: 0x34d399,
+    transparent: true,
+    opacity: 0.9,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+  });
+
+  const spawnOne = (now: number) => {
+    if (!spawn) return;
+    const site = spawn.sites[spawn.next]!;
+    const ring = new THREE.Mesh(ringGeometry, ringMaterial);
+    ring.position.copy(worldOf(site.candidate.lon, site.candidate.lat, 4));
+    ring.rotation.x = -Math.PI / 2;
+    ring.scale.setScalar(0.01);
+    ring.renderOrder = 3;
+    spawnGroup.add(ring);
+    const fan = buildFan(site.candidate, site.mask);
+    (fan.material as THREE.MeshBasicMaterial).opacity = 1;
+    spawnGroup.add(fan);
+    spawn.active.push({ ring, fan, bornAt: now });
+    spawn.next += 1;
+    spawn.onSiteSpawn(site.id);
+  };
+
+  const stepSpawn = (now: number) => {
+    if (!spawn || spawn.done) return;
+    while (spawn.next < spawn.sites.length && now >= spawn.nextAt) {
+      spawnOne(now);
+      spawn.nextAt = now + SPAWN_INTERVAL_MS;
+    }
+    let settling = false;
+    for (const entry of spawn.active) {
+      const grow = Math.min(1, (now - entry.bornAt) / SPAWN_RING_MS);
+      entry.ring.scale.setScalar(1 - Math.pow(1 - grow, 3));
+      const pulse = Math.min(1, (now - entry.bornAt) / SPAWN_PULSE_MS);
+      const material = entry.fan.material as THREE.MeshBasicMaterial;
+      material.opacity = 1 - pulse;
+      entry.fan.visible = pulse < 1;
+      if (pulse < 1 || grow < 1) settling = true;
+    }
+    if (spawn.next >= spawn.sites.length && !settling) {
+      spawn.done = true;
+      spawn.onSitesDone();
+    }
+  };
+
+  const startSpawn = (
+    sites: SiteAssessment[],
+    onSiteSpawn: (id: string) => void,
+    onSitesDone: () => void,
+  ) => {
+    spawn = {
+      sites,
+      next: 0,
+      nextAt: performance.now(),
+      active: [],
+      done: false,
+      onSiteSpawn,
+      onSitesDone,
+    };
+    if (reduceMotion?.matches) finishSpawn();
+  };
+
+  const finishSpawn = () => {
+    if (!spawn || spawn.done) return;
+    const now = performance.now();
+    while (spawn.next < spawn.sites.length) spawnOne(now - SPAWN_PULSE_MS);
+    for (const entry of spawn.active) {
+      entry.ring.scale.setScalar(1);
+      entry.fan.visible = false;
+    }
+    spawn.done = true;
+    spawn.onSitesDone();
+  };
+
+  // --- Winner and preview ------------------------------------------------
+  const winnerGroup = new THREE.Group();
+  scene.add(winnerGroup);
+  const previewGroup = new THREE.Group();
+  scene.add(previewGroup);
+  const previewTint = new THREE.Color('#38bdf8');
+
+  const disposeGroup = (group: THREE.Group) => {
+    while (group.children.length > 0) {
+      const child = group.children[0]!;
+      group.remove(child);
+      if (child instanceof THREE.Mesh) {
+        child.geometry.dispose();
+        (child.material as THREE.Material).dispose();
+      }
+    }
+  };
+
+  const clearSpawn = () => {
+    if (!spawn) return;
+    for (const entry of spawn.active) {
+      spawnGroup.remove(entry.ring);
+      spawnGroup.remove(entry.fan);
+      entry.fan.geometry.dispose();
+      (entry.fan.material as THREE.Material).dispose();
+    }
+    spawn = null;
+    disposeGroup(winnerGroup);
+    disposeGroup(previewGroup);
+  };
+  const blockGroup = new THREE.Group();
+  scene.add(blockGroup);
+  const blockGeometry = new THREE.SphereGeometry(36 * SCENE_SCALE, 12, 10);
+  const blockMaterial = new THREE.MeshBasicMaterial({ color: 0xfb4a45 });
+  const blockMarkers: { mesh: THREE.Mesh; revealKm: number }[] = [];
+  const unreachableColor = new THREE.Color('#94a3b8');
+  const openColor = new THREE.Color('#34d399');
+  const laterColor = new THREE.Color('#fbbf24');
+  const soonColor = new THREE.Color('#fb7185');
+  const hotColor = new THREE.Color('#ffffff');
+  const waveTint = new THREE.Color();
+
+  const tintFor = (closingHour: number | null, peakHour: number) => {
+    if (closingHour === null) return openColor;
+    if (closingHour <= WAVE_SOON_HOURS) return soonColor;
+    if (closingHour <= peakHour) return laterColor;
+    return openColor;
+  };
+
+  const paintWave = () => {
+    if (!wave) return;
+    const { evaluation, progressKm } = wave;
+    const array = roadColorAttribute.array as Float32Array;
+    let litKm = 0;
+    for (const segment of roadSegments) {
+      const edge = terrain.graph.edges[segment.edge]!;
+      if (edge.klass === 'rail') continue; // not routable; keeps its colour
+      const arrival = evaluation.arrivalKm[segment.edge];
+      if (arrival === null || arrival === undefined) {
+        paintSegment(array, segment, unreachableColor, 0.14);
+        continue;
+      }
+      const along = evaluation.fromA[segment.edge]
+        ? segment.alongKm
+        : edge.km - segment.alongKm - segment.km;
+      const reachedAt = arrival + along;
+      if (reachedAt <= progressKm) {
+        litKm += segment.km;
+        // The front burns white and cools into the road's colour behind it.
+        const hot = wave.done
+          ? 0
+          : clamp(1 - (progressKm - reachedAt) / WAVE_HOT_KM, 0, 1);
+        waveTint
+          .copy(tintFor(evaluation.closingHour[segment.edge]!, evaluation.peakHour))
+          .lerp(hotColor, hot * 0.85);
+        paintSegment(array, segment, waveTint, 0.98, 0.26 + hot * 0.55);
+      } else {
+        paintSegment(array, segment, intactColor, 0.42);
+      }
+    }
+    roadColorAttribute.needsUpdate = true;
+    glowColorAttribute.needsUpdate = true;
+    let cuts = 0;
+    for (const marker of blockMarkers) {
+      const revealed = marker.revealKm <= progressKm;
+      marker.mesh.visible = revealed;
+      if (revealed) {
+        cuts += 1;
+        // A short scale-in flash as each crossing is reached.
+        const age = Math.min(1, (progressKm - marker.revealKm) / 2);
+        marker.mesh.scale.setScalar(1 + (1 - age) * 1.6);
+      }
+    }
+    wave.onProgress({ reachableKm: litKm, cuts });
+  };
+
+  const settleWave = () => {
+    if (!wave || wave.done) return;
+    wave.progressKm = wave.evaluation.maxKm + 1;
+    wave.done = true;
+    paintWave();
+    wave.onDone();
+    startSpawn(wave.sites, wave.onSiteSpawn, wave.onSitesDone);
+  };
+
+  const stepWave = (now: number) => {
+    if (!wave || wave.done) return;
+    const t = Math.min(1, (now - wave.startedAt) / WAVE_DURATION_MS);
+    const eased = 1 - Math.pow(1 - t, 2);
+    wave.progressKm = eased * (wave.evaluation.maxKm + 1);
+    paintWave();
+    if (t >= 1) settleWave();
+  };
+
+  const clearWave = () => {
+    clearSpawn();
+    wave = null;
+    applyTowerVisibility();
+    for (const marker of blockMarkers) blockGroup.remove(marker.mesh);
+    blockMarkers.length = 0;
+    paintRoads(lastLevel);
   };
 
   // --- Homes, tinted by inundation ---------------------------------------
@@ -574,8 +953,7 @@ function createScene(
   const floodedHomeColor = new THREE.Color('#fb4a45');
   let homesFlooded = 0;
 
-  const paintHouses = (hour: number) => {
-    const level = floodLevelForHour(hour);
+  const paintHouses = (level: number) => {
     homesFlooded = 0;
     for (let i = 0; i < houseCount; i += 1) {
       const wet = houseHand[i] !== HAND_DRY && houseHand[i]! / 10 < level;
@@ -583,6 +961,83 @@ function createScene(
       houseMesh.setColorAt(i, wet ? floodedHomeColor : homeColor);
     }
     if (houseMesh.instanceColor) houseMesh.instanceColor.needsUpdate = true;
+  };
+
+  // --- Rain forecast layer (overview only) --------------------------------
+  // A translucent plane above the terrain carrying a canvas texture redrawn
+  // from the forecast grid: one soft radial cell per grid cell, colour and
+  // opacity following intensity, interpolated between the two nearest hours.
+  const rainCanvas = document.createElement('canvas');
+  rainCanvas.width = RAIN_CANVAS_WIDTH;
+  rainCanvas.height = RAIN_CANVAS_HEIGHT;
+  const rainContext = rainCanvas.getContext('2d');
+  const rainTexture = new THREE.CanvasTexture(rainCanvas);
+  rainTexture.colorSpace = THREE.SRGBColorSpace;
+  const rainPlane = new THREE.Mesh(
+    new THREE.PlaneGeometry(g.extentX, g.extentZ),
+    new THREE.MeshBasicMaterial({
+      map: rainTexture,
+      transparent: true,
+      depthWrite: false,
+    }),
+  );
+  // Lies flat; the plane's local +Y (canvas top) maps to world -Z, north.
+  rainPlane.rotation.x = -Math.PI / 2;
+  rainPlane.position.y = elevationToWorldY(
+    meta.elevation.max + RAIN_PLANE_LIFT_METRES,
+  );
+  rainPlane.renderOrder = 4;
+  rainPlane.visible = false;
+  scene.add(rainPlane);
+
+  let forecast: Forecast | null = null;
+  let forecastHour = 0;
+  const drizzle = new THREE.Color('#a9dcf7');
+  const heavy = new THREE.Color('#2260c4');
+  const storm = new THREE.Color('#8b5cf6');
+  const cellColor = new THREE.Color();
+
+  const drawRain = () => {
+    if (!rainContext) return;
+    rainContext.clearRect(0, 0, RAIN_CANVAS_WIDTH, RAIN_CANVAS_HEIGHT);
+    if (!forecast) {
+      rainTexture.needsUpdate = true;
+      return;
+    }
+    const { grid, rain, hours } = forecast;
+    const h0 = clamp(Math.floor(forecastHour), 0, hours - 1);
+    const h1 = Math.min(h0 + 1, hours - 1);
+    const th = clamp(forecastHour - h0, 0, 1);
+    const cellWidth = RAIN_CANVAS_WIDTH / grid.cols;
+    const cellHeight = RAIN_CANVAS_HEIGHT / grid.rows;
+    const radius = Math.max(cellWidth, cellHeight) * 1.15;
+    // Soft edges even where the browser lacks canvas filters.
+    rainContext.filter = 'blur(5px)';
+    for (let row = 0; row < grid.rows; row += 1) {
+      for (let col = 0; col < grid.cols; col += 1) {
+        const index = row * grid.cols + col;
+        const mm =
+          (rain[h0]![index] ?? 0) * (1 - th) + (rain[h1]![index] ?? 0) * th;
+        if (mm < 0.3) continue;
+        const t = clamp(mm / RAIN_STORM_MM, 0, 1);
+        cellColor.copy(drizzle).lerp(heavy, t);
+        if (mm >= RAIN_STORM_MM) {
+          cellColor.lerp(storm, clamp((mm - RAIN_STORM_MM) / 25, 0, 0.8));
+        }
+        const alpha = 0.15 + 0.4 * t + (mm >= RAIN_STORM_MM ? 0.1 : 0);
+        const cx = (col + 0.5) * cellWidth;
+        const cy = (row + 0.5) * cellHeight;
+        const gradient = rainContext.createRadialGradient(cx, cy, 0, cx, cy, radius);
+        const rgb = `${Math.round(cellColor.r * 255)},${Math.round(cellColor.g * 255)},${Math.round(cellColor.b * 255)}`;
+        gradient.addColorStop(0, `rgba(${rgb},${alpha})`);
+        gradient.addColorStop(0.55, `rgba(${rgb},${alpha * 0.55})`);
+        gradient.addColorStop(1, `rgba(${rgb},0)`);
+        rainContext.fillStyle = gradient;
+        rainContext.fillRect(cx - radius, cy - radius, radius * 2, radius * 2);
+      }
+    }
+    rainContext.filter = 'none';
+    rainTexture.needsUpdate = true;
   };
 
   // --- Tower and line-of-sight service area ------------------------------
@@ -617,55 +1072,61 @@ function createScene(
   beacon.position.y = mastHeight * 1.05;
   towerGroup.add(beacon);
 
+  // The concept tower steps aside while a route run is showing its own
+  // candidates and winner.
+  let layerState: Record<LayerKey, boolean> | null = null;
+  const applyTowerVisibility = () => {
+    const showTower = wave === null;
+    towerGroup.visible = showTower && (layerState?.towers ?? true);
+    coverageGroup.visible = showTower && (layerState?.coverage ?? true);
+  };
+
   const coverageGroup = new THREE.Group();
   scene.add(coverageGroup);
 
-  const buildCoverage = () => {
-    const spokes = 96;
-    const rings = 60;
-    const radius = COVERAGE_RADIUS_METRES * SCENE_SCALE;
-    const eye = towerBase.y + mastHeight;
-    const ringStep = radius / rings;
+  // A coverage fan: one vertex per viewshed sample, draped on the terrain,
+  // alpha where the mast has line of sight and fading with distance. The
+  // material's opacity scales the whole fan, which is how a pulse is done.
+  const emerald = new THREE.Color('#34d399');
+  const buildFan = (
+    site: { lon: number; lat: number },
+    mask: ViewshedMask,
+    tint: THREE.Color = emerald,
+  ) => {
+    const base = worldOf(site.lon, site.lat);
+    const radius = mask.radiusMetres * SCENE_SCALE;
+    const ringStep = radius / mask.rings;
     const vertices: number[] = [];
     const shades: number[] = [];
     const meshIndices: number[] = [];
-    const emerald = new THREE.Color('#34d399');
-
-    for (let s = 0; s < spokes; s += 1) {
-      const angle = (s / spokes) * Math.PI * 2;
+    for (let s = 0; s < mask.spokes; s += 1) {
+      const angle = (s / mask.spokes) * Math.PI * 2;
       const dirX = Math.cos(angle);
       const dirZ = Math.sin(angle);
-      let horizon = Number.NEGATIVE_INFINITY;
-      for (let r = 0; r <= rings; r += 1) {
-        const distance = Math.max(r * ringStep, 0.001);
-        const x = towerBase.x + dirX * distance;
-        const z = towerBase.z + dirZ * distance;
-        const groundY = elevationToWorldY(elevationAt(x, z));
-        const angleToGround = (groundY - eye) / distance;
-        const visible = angleToGround >= horizon - 0.004;
-        if (angleToGround > horizon) horizon = angleToGround;
+      for (let r = 0; r <= mask.rings; r += 1) {
+        const distance = r * ringStep;
+        const x = base.x + dirX * distance;
+        const z = base.z + dirZ * distance;
         const falloff = 1 - (distance / radius) ** 2;
-        vertices.push(x, groundY + 0.35, z);
+        vertices.push(x, elevationToWorldY(elevationAt(x, z)) + 0.35, z);
         shades.push(
-          emerald.r,
-          emerald.g,
-          emerald.b,
-          visible ? 0.14 + 0.36 * falloff : 0,
+          tint.r,
+          tint.g,
+          tint.b,
+          mask.visible[s * (mask.rings + 1) + r] ? 0.14 + 0.36 * falloff : 0,
         );
       }
     }
-
-    for (let s = 0; s < spokes; s += 1) {
-      const nextSpoke = (s + 1) % spokes;
-      for (let r = 0; r < rings; r += 1) {
-        const a = s * (rings + 1) + r;
+    for (let s = 0; s < mask.spokes; s += 1) {
+      const nextSpoke = (s + 1) % mask.spokes;
+      for (let r = 0; r < mask.rings; r += 1) {
+        const a = s * (mask.rings + 1) + r;
         const b = a + 1;
-        const c = nextSpoke * (rings + 1) + r;
+        const c = nextSpoke * (mask.rings + 1) + r;
         const d = c + 1;
         meshIndices.push(a, c, b, b, c, d);
       }
     }
-
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute(
       'position',
@@ -683,16 +1144,22 @@ function createScene(
       }),
     );
     mesh.renderOrder = 3;
-    coverageGroup.add(mesh);
+    return mesh;
+  };
+
+  const buildCoverage = () => {
+    coverageGroup.add(
+      buildFan(
+        meta.towerSite,
+        viewshedMask(terrain, meta.towerSite, TOWER_MAST_METRES, COVERAGE_RADIUS_METRES),
+      ),
+    );
   };
 
   buildCoverage();
-  buildFlood(initialHour);
-  paintRoads(initialHour);
-  paintHouses(initialHour);
-  if (status.severed) status.severed.textContent = severedKm.toFixed(1);
-  if (status.area) status.area.textContent = floodedKm2.toFixed(1);
-  if (status.homes) status.homes.textContent = String(homesFlooded);
+  buildFlood(initialLevel);
+  paintRoads(initialLevel);
+  paintHouses(initialLevel);
 
   // --- Camera framing ----------------------------------------------------
   // Opens on the valley oblique: Gunung Stong's massif to the south-west,
@@ -701,7 +1168,7 @@ function createScene(
   // the modelled inundation, with the camera behind the tower looking down
   // the valley, so the scene opens on the decision at hand: mast and
   // coverage in the foreground, the severed artery and flood beyond.
-  const openingLevel = floodLevelForHour(initialHour);
+  const openingLevel = initialLevel;
   let wetX = 0;
   let wetZ = 0;
   let wetCount = 0;
@@ -735,6 +1202,97 @@ function createScene(
   controls.target.copy(homeTarget);
   controls.update();
 
+  // --- Views: oblique ground view and top-down overview -------------------
+  let view: View = 'ground';
+  type Flight = {
+    to: View;
+    fromPosition: THREE.Vector3;
+    fromTarget: THREE.Vector3;
+    toPosition: THREE.Vector3;
+    toTarget: THREE.Vector3;
+    fromSun: number;
+    elapsed: number;
+  };
+  let flight: Flight | null = null;
+
+  // The overview pivots on the AOI centre and sits high enough to fit the
+  // whole tile at the camera's field of view and current aspect.
+  const overviewTarget = new THREE.Vector3(
+    0,
+    elevationToWorldY(elevationAt(0, 0)),
+    0,
+  );
+  const overviewDistance = () => {
+    const halfFov = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
+    const fitZ = g.extentZ / 2 / halfFov;
+    const fitX = g.extentX / 2 / (halfFov * camera.aspect);
+    return Math.max(fitX, fitZ) * 1.5;
+  };
+  // The site view stands behind the Kuala Krai depot, raised, looking down
+  // the valley toward the AOI centre: the route wave starts right in front of
+  // the camera and runs away into the distance.
+  const depotBase = worldOf(meta.depot.lon, meta.depot.lat);
+  const siteTarget = new THREE.Vector3().lerpVectors(
+    depotBase,
+    overviewTarget,
+    0.3,
+  );
+  siteTarget.y = elevationToWorldY(elevationAt(siteTarget.x, siteTarget.z));
+  const awayFromCentre = new THREE.Vector3(
+    depotBase.x - overviewTarget.x,
+    0,
+    depotBase.z - overviewTarget.z,
+  );
+  if (awayFromCentre.lengthSq() < 1e-6) awayFromCentre.set(1, 0, -1);
+  awayFromCentre.normalize().setY(0.42).normalize();
+  const sitePosition = siteTarget
+    .clone()
+    .add(awayFromCentre.multiplyScalar(orbitDistance * 1.15));
+
+  const overviewPosition = () => {
+    const distance = overviewDistance();
+    // A hair off vertical on the south side keeps OrbitControls' azimuth
+    // well defined and puts north at the top of the screen.
+    return new THREE.Vector3(
+      overviewTarget.x,
+      overviewTarget.y + distance,
+      overviewTarget.z + distance * 0.001,
+    );
+  };
+
+  const applyViewState = (next: View) => {
+    view = next;
+    const overview = next === 'overview';
+    // 'site' is a ground view framed from the depot; only the overview changes the scene's dressing.
+    controls.enableRotate = !overview;
+    controls.minPolarAngle = overview ? 0.001 : 0.2;
+    controls.maxPolarAngle = overview ? 0.001 : 1.45;
+    controls.maxDistance = overview ? overviewDistance() * 1.35 : 700;
+    scene.fog = overview ? null : fog;
+    scene.background = overview ? null : sky;
+    sun.intensity = overview ? SUN_OVERVIEW : SUN_GROUND;
+    rainPlane.visible = overview && forecast !== null;
+  };
+
+  const stepFlight = (dt: number) => {
+    if (!flight) return;
+    flight.elapsed += dt;
+    const t = Math.min(1, flight.elapsed / FLIGHT_SECONDS);
+    const eased = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+    camera.position.lerpVectors(flight.fromPosition, flight.toPosition, eased);
+    controls.target.lerpVectors(flight.fromTarget, flight.toTarget, eased);
+    const toSun = flight.to === 'overview' ? SUN_OVERVIEW : SUN_GROUND;
+    sun.intensity = flight.fromSun + (toSun - flight.fromSun) * eased;
+    camera.lookAt(controls.target);
+    if (t >= 1) {
+      const destination = flight.to;
+      flight = null;
+      applyViewState(destination);
+      controls.enabled = true;
+      controls.update();
+    }
+  };
+
   // Keep the orbit pivot inside the tile so the view can never wander off
   // into the void. Its height is only re-grounded once a gesture has ended,
   // and gently: snapping it to the terrain mid-pan made the camera heave
@@ -763,6 +1321,7 @@ function createScene(
   // --- Marker projection -------------------------------------------------
   const anchorPoints = anchors.map((anchor) => ({
     id: anchor.id,
+    kind: anchor.kind,
     point: worldOf(anchor.lon, anchor.lat, anchor.liftMetres),
   }));
   const projected = new THREE.Vector3();
@@ -774,7 +1333,13 @@ function createScene(
       const element = markerElements.get(anchor.id);
       if (!element) continue;
       projected.copy(anchor.point).project(camera);
-      let hidden = projected.z > 1;
+      // Settlements stay labelled in the overview (they carry the rain
+      // readouts); the tower only makes sense from the ground.
+      let hidden =
+        projected.z > 1 ||
+        flight !== null ||
+        (view === 'overview' && anchor.kind !== 'population') ||
+        (anchor.kind === 'tower' && wave !== null);
       if (!hidden) {
         const steps = 16;
         for (let i = 1; i < steps; i += 1) {
@@ -915,7 +1480,7 @@ function createScene(
     } else {
       // Two-finger scroll: sideways orbits, up and down flies. Signs follow
       // natural scrolling so the world moves with the fingers.
-      orbitPending += deltaX * SWIPE_ORBIT_RATE;
+      if (view !== 'overview') orbitPending += deltaX * SWIPE_ORBIT_RATE;
       flyPending -= deltaY * SWIPE_FLY_RATE;
     }
     gestureUntil = performance.now() + GESTURE_TAIL_MS;
@@ -1027,13 +1592,21 @@ function createScene(
     const dt = dtMs / 1000;
     const gesturing = dragging || now < gestureUntil;
     const idle = now - lastInteraction > IDLE_DRIFT_DELAY;
-    controls.autoRotate = idle && !reduceMotion?.matches;
+    controls.autoRotate =
+      idle && !reduceMotion?.matches && view !== 'overview' && !flight;
     // OrbitControls damps per update() call; scale the factor by the frame
     // interval so the feel is the same at 60 Hz and on a 120 Hz display.
     controls.dampingFactor = 1 - Math.pow(1 - BASE_DAMPING, dtMs / (1000 / 60));
-    applyGestures(dt);
-    controls.update(dt);
-    clampPivot(dt, gesturing);
+    if (flight) {
+      // The tween owns the camera; OrbitControls would clamp it mid-flight.
+      stepFlight(dt);
+    } else {
+      applyGestures(dt);
+      controls.update(dt);
+      clampPivot(dt, gesturing);
+    }
+    stepWave(now);
+    stepSpawn(now);
     adaptResolution(dtMs, gesturing);
     updateMarkers();
     renderer.render(scene, camera);
@@ -1066,21 +1639,161 @@ function createScene(
 
   return {
     setLayers(layers) {
+      layerState = layers;
       floodMesh.visible = layers.flood;
       roadGroup.visible = layers.roads;
-      coverageGroup.visible = layers.coverage;
-      towerGroup.visible = layers.towers;
       houseGroup.visible = layers.population;
+      applyTowerVisibility();
     },
-    setHour(hour) {
-      buildFlood(hour);
-      paintRoads(hour);
-      paintHouses(hour);
-      if (status.severed) status.severed.textContent = severedKm.toFixed(1);
-      if (status.area) status.area.textContent = floodedKm2.toFixed(1);
-      if (status.homes) status.homes.textContent = String(homesFlooded);
+    setLevel(metres) {
+      buildFlood(metres);
+      paintRoads(metres);
+      paintHouses(metres);
+    },
+    setForecast(next) {
+      forecast = next;
+      rainPlane.visible = view === 'overview';
+      drawRain();
+    },
+    setForecastHour(hour) {
+      forecastHour = hour;
+      drawRain();
+    },
+    metrics() {
+      return { severedKm, floodedKm2, homesFlooded };
+    },
+    playRouteWave(evaluation, sites, callbacks) {
+      clearWave();
+      for (const crossing of evaluation.blocked) {
+        const mesh = new THREE.Mesh(blockGeometry, blockMaterial);
+        mesh.position.copy(worldOf(crossing.lon, crossing.lat, 8));
+        mesh.visible = false;
+        blockGroup.add(mesh);
+        blockMarkers.push({ mesh, revealKm: crossing.revealKm });
+      }
+      wave = {
+        evaluation,
+        startedAt: performance.now(),
+        progressKm: 0,
+        done: false,
+        onProgress: callbacks.onProgress,
+        onDone: callbacks.onDone,
+        sites,
+        onSiteSpawn: callbacks.onSiteSpawn,
+        onSitesDone: callbacks.onSitesDone,
+      };
+      applyTowerVisibility();
+      if (reduceMotion?.matches) settleWave();
+      else paintWave();
+    },
+    finishRouteWave() {
+      settleWave();
+      finishSpawn();
+    },
+    showWinner(site) {
+      disposeGroup(winnerGroup);
+      if (!site) return;
+      const base = worldOf(site.candidate.lon, site.candidate.lat);
+      const winnerMast = new THREE.Mesh(mast.geometry.clone(), mastMaterial.clone());
+      winnerMast.position.set(base.x, base.y + mastHeight / 2, base.z);
+      winnerGroup.add(winnerMast);
+      const winnerBeacon = new THREE.Mesh(
+        beacon.geometry.clone(),
+        new THREE.MeshBasicMaterial({ color: 0x34d399 }),
+      );
+      winnerBeacon.position.set(base.x, base.y + mastHeight * 1.05, base.z);
+      winnerGroup.add(winnerBeacon);
+      winnerGroup.add(buildFan(site.candidate, site.mask));
+
+      // Glide in from the current bearing, close enough to read the fan.
+      const target = base.clone();
+      const bearing = new THREE.Vector3()
+        .subVectors(camera.position, controls.target)
+        .setY(0);
+      if (bearing.lengthSq() < 1e-6) bearing.set(1, 0, 1);
+      bearing.normalize().setY(0.55).normalize();
+      const toPosition = target
+        .clone()
+        .add(bearing.multiplyScalar(orbitDistance * 0.34));
+      zoomActive = false;
+      zoomAnchorValid = false;
+      orbitPending = 0;
+      flyPending = 0;
+      lastInteraction = performance.now();
+      if (reduceMotion?.matches) {
+        flight = null;
+        camera.position.copy(toPosition);
+        controls.target.copy(target);
+        controls.update();
+        return;
+      }
+      controls.enabled = false;
+      flight = {
+        to: 'site',
+        fromPosition: camera.position.clone(),
+        fromTarget: controls.target.clone(),
+        toPosition,
+        toTarget: target,
+        fromSun: sun.intensity,
+        elapsed: 0,
+      };
+    },
+    previewSite(site) {
+      disposeGroup(previewGroup);
+      if (!site) return;
+      previewGroup.add(buildFan(site.candidate, site.mask, previewTint));
+    },
+    clearRouteWave() {
+      clearWave();
+    },
+    flyTo(next) {
+      if (next === view && !flight) return;
+      zoomActive = false;
+      zoomAnchorValid = false;
+      orbitPending = 0;
+      flyPending = 0;
+      lastInteraction = performance.now();
+      const toPosition =
+        next === 'overview'
+          ? overviewPosition()
+          : next === 'site'
+            ? sitePosition.clone()
+            : homePosition.clone();
+      const toTarget =
+        next === 'overview'
+          ? overviewTarget.clone()
+          : next === 'site'
+            ? siteTarget.clone()
+            : homeTarget.clone();
+      if (reduceMotion?.matches) {
+        flight = null;
+        camera.position.copy(toPosition);
+        controls.target.copy(toTarget);
+        applyViewState(next);
+        controls.enabled = true;
+        controls.update();
+        return;
+      }
+      // Sky, fog and the rain layer switch at take-off so nothing pops at
+      // the end.
+      scene.fog = next === 'overview' ? null : fog;
+      scene.background = next === 'overview' ? null : sky;
+      rainPlane.visible = next === 'overview' && forecast !== null;
+      controls.enabled = false;
+      flight = {
+        to: next,
+        fromPosition: camera.position.clone(),
+        fromTarget: controls.target.clone(),
+        toPosition,
+        toTarget,
+        fromSun: sun.intensity,
+        elapsed: 0,
+      };
     },
     resetView() {
+      flight = null;
+      controls.enabled = true;
+      applyViewState('ground');
       camera.position.copy(homePosition);
       controls.target.copy(homeTarget);
       zoomActive = false;
@@ -1112,6 +1825,11 @@ function createScene(
         }
       });
       surfaceTexture.dispose();
+      rainTexture.dispose();
+      blockGeometry.dispose();
+      blockMaterial.dispose();
+      ringGeometry.dispose();
+      ringMaterial.dispose();
       sky.dispose();
       scene.background = null;
       renderer.dispose();
@@ -1120,13 +1838,52 @@ function createScene(
   };
 }
 
+export type RouteRun = {
+  /** Changes for every new Start press. */
+  id: number;
+  evaluation: RouteEvaluation;
+  /** Reachable candidates in spawn order, with their viewsheds. */
+  sites: SiteAssessment[];
+  /** True once the officer asked to skip the animation. */
+  skip: boolean;
+};
+
 export function Terrain3D({
   layers,
-  timeline,
+  level,
+  view,
+  forecast,
+  forecastHour,
+  routeRun,
+  onRouteProgress,
+  onRouteDone,
+  spawnedIds,
+  onSiteSpawn,
+  onSitesDone,
+  winnerId,
+  previewId,
+  onPreview,
   resetSignal,
 }: {
   layers: Record<LayerKey, boolean>;
-  timeline: number;
+  /** HAND flood threshold in metres above the drainage datum. */
+  level: number;
+  view: View;
+  forecast: Forecast | null;
+  forecastHour: number;
+  /** A route evaluation to animate, or null to clear the wave. */
+  routeRun: RouteRun | null;
+  onRouteProgress: (state: { reachableKm: number; cuts: number }) => void;
+  onRouteDone: () => void;
+  /** Candidate ids whose markers should be on screen. */
+  spawnedIds: string[];
+  onSiteSpawn: (id: string) => void;
+  onSitesDone: () => void;
+  /** The chosen site once the evaluation has finished; null before that. */
+  winnerId: string | null;
+  /** A runner-up whose coverage is being previewed. */
+  previewId: string | null;
+  onPreview: (id: string) => void;
   resetSignal: number;
 }) {
   // The baked assets are fetched from the client only: this component is
@@ -1135,11 +1892,8 @@ export function Terrain3D({
   const [failed, setFailed] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const markerRefs = useRef(new Map<string, HTMLDivElement>());
-  const severedRef = useRef<HTMLSpanElement>(null);
-  const areaRef = useRef<HTMLSpanElement>(null);
-  const homesRef = useRef<HTMLSpanElement>(null);
   const sceneRef = useRef<SceneHandle | null>(null);
-  const timelineRef = useRef(timeline);
+  const levelRef = useRef(level);
   const anchors = useMemo(
     () => (terrain ? deriveAnchors(terrain) : []),
     [terrain],
@@ -1169,12 +1923,7 @@ export function Terrain3D({
       terrain,
       anchors,
       markerRefs.current,
-      {
-        severed: severedRef.current,
-        area: areaRef.current,
-        homes: homesRef.current,
-      },
-      timelineRef.current,
+      levelRef.current,
     );
     sceneRef.current = handle;
     return () => {
@@ -1190,9 +1939,62 @@ export function Terrain3D({
   }, [layers, terrain]);
 
   useEffect(() => {
-    timelineRef.current = timeline;
-    sceneRef.current?.setHour(timeline);
-  }, [timeline, terrain]);
+    levelRef.current = level;
+    sceneRef.current?.setLevel(level);
+  }, [level, terrain]);
+
+  useEffect(() => {
+    sceneRef.current?.flyTo(view);
+  }, [view, terrain]);
+
+  useEffect(() => {
+    if (forecast) sceneRef.current?.setForecast(forecast);
+  }, [forecast, terrain]);
+
+  useEffect(() => {
+    sceneRef.current?.setForecastHour(forecastHour);
+  }, [forecastHour, terrain]);
+
+  // A new evaluation object arrives with every Start press; the callbacks
+  // are stable, so the wave only restarts when the evaluation changes.
+  const routeEvaluation = routeRun?.evaluation ?? null;
+  const routeSites = routeRun?.sites ?? null;
+  useEffect(() => {
+    const scene = sceneRef.current;
+    if (!scene) return;
+    if (routeEvaluation === null || routeSites === null) {
+      scene.clearRouteWave();
+      return;
+    }
+    scene.playRouteWave(routeEvaluation, routeSites, {
+      onProgress: onRouteProgress,
+      onDone: onRouteDone,
+      onSiteSpawn,
+      onSitesDone,
+    });
+  }, [
+    routeEvaluation,
+    routeSites,
+    onRouteProgress,
+    onRouteDone,
+    onSiteSpawn,
+    onSitesDone,
+    terrain,
+  ]);
+
+  useEffect(() => {
+    if (routeRun?.skip) sceneRef.current?.finishRouteWave();
+  }, [routeRun?.skip]);
+
+  const winnerSite = routeSites?.find((site) => site.id === winnerId) ?? null;
+  useEffect(() => {
+    sceneRef.current?.showWinner(winnerSite);
+  }, [winnerSite, terrain]);
+
+  const previewSite = routeSites?.find((site) => site.id === previewId) ?? null;
+  useEffect(() => {
+    sceneRef.current?.previewSite(previewSite);
+  }, [previewSite, terrain]);
 
   useEffect(() => {
     if (resetSignal > 0) sceneRef.current?.resetView();
@@ -1214,33 +2016,104 @@ export function Terrain3D({
           {failed ? 'Terrain assets unavailable' : 'Loading terrain model…'}
         </p>
       )}
-      <div className="pointer-events-none absolute top-[132px] right-6 z-20 hidden items-center gap-1.5 xl:right-[360px] rounded-lg border border-red-300/20 bg-red-950/70 px-2.5 py-2 text-[11px] font-medium text-red-100 backdrop-blur-md lg:flex">
-        <TriangleAlert className="size-3.5 text-red-300" aria-hidden />
-        <span ref={severedRef} className="tabular-nums">
-          0
-        </span>
-        km of road & rail cut ·
-        <span ref={areaRef} className="tabular-nums">
-          0
-        </span>
-        km² inundated ·
-        <span ref={homesRef} className="tabular-nums">
-          0
-        </span>
-        homes flooded
-      </div>
       <div className="pointer-events-none absolute inset-0 overflow-hidden">
         {anchors.map((anchor) => {
+          const site =
+            anchor.kind === 'candidate'
+              ? routeSites?.find((entry) => entry.id === anchor.id)
+              : undefined;
           const visible =
-            anchor.kind === 'tower' ? layers.towers : layers.population;
+            anchor.kind === 'tower'
+              ? layers.towers
+              : anchor.kind === 'depot'
+                ? true
+                : anchor.kind === 'candidate'
+                  ? site !== undefined && spawnedIds.includes(anchor.id)
+                  : layers.population;
           if (!visible) return null;
+          // In the overview a settlement shows the rain falling on it right
+          // now, sampled from the forecast grid at the selected hour.
+          const overview = view === 'overview' && anchor.kind === 'population';
+          const rain =
+            overview && forecast
+              ? rainAt(forecast, forecastHour, anchor.lon, anchor.lat)
+              : 0;
+          const rainTone =
+            rain >= 40
+              ? 'border-violet-300/40 bg-violet-500/25 text-violet-100'
+              : rain >= 2
+                ? 'border-sky-300/40 bg-sky-500/20 text-sky-100'
+                : 'border-slate-500/40 bg-slate-800/70 text-slate-300';
           return (
             <div
               key={anchor.id}
               ref={registerMarker(anchor.id)}
               className="map-marker absolute left-0 top-0 transition-opacity duration-150 will-change-transform"
             >
-              {anchor.kind === 'tower' ? (
+              {overview ? (
+                <div
+                  className={`flex -translate-x-1/2 -translate-y-1/2 items-center gap-1.5 whitespace-nowrap rounded-full border px-2 py-1 text-[11px] font-semibold backdrop-blur-sm ${rainTone}`}
+                >
+                  <span className="size-1.5 rounded-full bg-current" />
+                  {anchor.label}
+                  <span className="font-normal opacity-80 tabular-nums">
+                    {rain.toFixed(0)} mm/h
+                  </span>
+                </div>
+              ) : anchor.kind === 'candidate' && anchor.id === winnerId ? (
+                <div className="flex -translate-x-1/2 -translate-y-full flex-col items-center">
+                  <div className="mb-2 whitespace-nowrap rounded-lg border border-emerald-300/45 bg-[#07131d]/92 px-3 py-2 shadow-xl backdrop-blur-md">
+                    <div className="text-[10px] font-semibold tracking-[0.12em] text-emerald-300 uppercase">
+                      Best site
+                    </div>
+                    <div className="flex items-center gap-2 text-sm font-semibold text-white">
+                      <RadioTower className="size-4 text-emerald-300" aria-hidden />
+                      {anchor.label}
+                    </div>
+                    <div className="mt-0.5 pl-6 text-xs text-emerald-100/85 tabular-nums">
+                      reaches {site?.homesReconnected ?? 0} cut-off homes
+                    </div>
+                  </div>
+                  <div className="grid size-9 place-items-center rounded-full border-2 border-white bg-emerald-400 text-emerald-950 shadow-[0_0_0_7px_rgb(52_211_153/22%)]">
+                    <RadioTower className="size-4" aria-hidden />
+                  </div>
+                </div>
+              ) : anchor.kind === 'candidate' && winnerId !== null ? (
+                // Runner-up: a muted badge with its count; tap to preview coverage.
+                <button
+                  type="button"
+                  onClick={() => onPreview(anchor.id)}
+                  aria-pressed={previewId === anchor.id}
+                  title={`${anchor.label}: reaches ${site?.homesReconnected ?? 0} cut-off homes`}
+                  className={`pointer-events-auto flex min-h-7 -translate-x-1/2 -translate-y-1/2 items-center gap-1.5 whitespace-nowrap rounded-full border px-2 text-[11px] font-semibold tabular-nums backdrop-blur-sm transition-colors ${
+                    previewId === anchor.id
+                      ? 'border-sky-300/60 bg-sky-500/30 text-white'
+                      : 'border-slate-500/40 bg-slate-900/70 text-slate-300 hover:border-sky-300/40 hover:text-white'
+                  }`}
+                >
+                  <span className="size-1.5 rounded-full bg-current opacity-70" />
+                  {site?.homesReconnected ?? 0}
+                </button>
+              ) : anchor.kind === 'candidate' ? (
+                <div className="flex -translate-x-1/2 -translate-y-full flex-col items-center">
+                  <div className="mb-1 whitespace-nowrap rounded-md border border-emerald-300/30 bg-[#07131d]/85 px-2 py-1 text-[11px] leading-4 backdrop-blur-sm">
+                    <span className="font-semibold text-white">{anchor.label}</span>
+                    <span className="block text-emerald-200/90 tabular-nums">
+                      reaches {site?.homesReconnected ?? 0} cut-off homes
+                    </span>
+                  </div>
+                  <span className="size-2.5 rounded-full border-2 border-white bg-emerald-400 shadow-[0_0_0_4px_rgb(52_211_153/25%)]" />
+                </div>
+              ) : anchor.kind === 'depot' ? (
+                <div className="flex -translate-x-1/2 -translate-y-full flex-col items-center">
+                  <span className="mb-1.5 whitespace-nowrap rounded-md border border-amber-200/30 bg-[#07131d]/85 px-2 py-1 text-xs font-semibold text-amber-100 backdrop-blur-sm">
+                    {anchor.label}
+                  </span>
+                  <div className="grid size-8 place-items-center rounded-full border-2 border-white bg-amber-400 text-amber-950 shadow-[0_0_0_6px_rgb(251_191_36/18%)]">
+                    <Warehouse className="size-4" aria-hidden />
+                  </div>
+                </div>
+              ) : anchor.kind === 'tower' ? (
                 <div className="flex -translate-x-1/2 -translate-y-full flex-col items-center">
                   <div className="mb-2 whitespace-nowrap rounded-lg border border-emerald-300/35 bg-[#07131d]/90 px-3 py-2 shadow-xl backdrop-blur-md">
                     <div className="flex items-center gap-2 text-sm font-semibold text-white">
