@@ -16,8 +16,10 @@
  *   hand.bin       Uint8 decimetres of Height Above Nearest Drainage, 255 = dry
  *   surface.jpg    Sentinel-2 mosaic reprojected to the AOI's mercator box
  *   houses.bin     Float32 little-endian [lon, lat, heading] per home
- *   terrain.json   grid metadata, attribution, roads + rail, settlements,
- *                  tower site
+ *   roads.json     junction-preserving road + rail graph: nodes and edges
+ *                  with drawn geometry, length and minimum HAND
+ *   terrain.json   grid metadata, attribution, settlements, depot, tower
+ *                  candidates
  *
  * Homes are OSM building footprints where they exist; elsewhere they are
  * illustrative houses filling OSM residential areas and clustered around
@@ -423,46 +425,178 @@ async function overpass(query, cacheKey) {
 
 const BBOX = `${AOI.south},${AOI.west},${AOI.north},${AOI.east}`;
 
-/** Fetches ways matching an Overpass selector and decimates their geometry. */
-async function bakeWays(selector, cacheKey, klassOf) {
+/** Fetches raw Overpass ways (with node ids and geometry) for a selector. */
+async function fetchWays(selector, cacheKey) {
   const data = await overpass(
     `[out:json][timeout:120];way${selector}(${BBOX});out geom;`,
     cacheKey,
   );
-  const roads = [];
-  for (const way of data.elements) {
-    if (!way.geometry || way.geometry.length < 2) continue;
-    const points = [];
-    let last = null;
-    for (const node of way.geometry) {
-      // Decimate to ~60 m so the drape stays cheap.
-      if (
-        last &&
-        Math.hypot(node.lat - last.lat, node.lon - last.lon) < 0.0005
-      ) {
-        continue;
-      }
-      points.push([Number(node.lon.toFixed(5)), Number(node.lat.toFixed(5))]);
-      last = node;
-    }
-    if (points.length < 2) continue;
-    roads.push({ klass: klassOf(way), points });
-  }
-  log(cacheKey, roads.length, 'ways');
-  return roads;
+  const ways = data.elements.filter(
+    (way) => way.nodes && way.geometry && way.geometry.length >= 2,
+  );
+  log(cacheKey, ways.length, 'ways');
+  return ways;
 }
 
-const bakeRoads = () =>
-  bakeWays(
-    '["highway"~"^(motorway|trunk|primary|secondary|tertiary)$"]',
-    'roads',
-    (way) => way.tags.highway,
+const fetchRoads = () =>
+  fetchWays('["highway"~"^(motorway|trunk|primary|secondary|tertiary)$"]', 'roads');
+
+// Unclassified roads are the rural connectors: without them the classified
+// network splits into an east and a west half that only meet outside the
+// AOI. Residential streets are fetched alongside but left out of the graph.
+const fetchMinorRoads = async () =>
+  (await fetchWays('["highway"~"^(unclassified|residential)$"]', 'roads-minor')).filter(
+    (way) => way.tags.highway === 'unclassified',
   );
 
 // The KTM East Coast line runs the length of the Galas valley; sidings and
 // yards are left out so only the through line is drawn.
-const bakeRails = () =>
-  bakeWays('["railway"="rail"]["service"!~"."]', 'rails', () => 'rail');
+const fetchRails = () => fetchWays('["railway"="rail"]["service"!~"."]', 'rails');
+
+const SIMPLIFY_DEG = 0.0005; // ~55 m between kept polyline points
+const HAND_SAMPLE_METRES = 30;
+const MAX_EDGE_KM = 1; // longer runs are split so one dip blocks one piece
+
+/**
+ * Builds a junction-preserving graph from OSM ways. Every node that appears
+ * in more than one way, or ends a way, becomes a graph node; the geometry
+ * between two graph nodes becomes one edge, simplified for drawing but with
+ * HAND sampled along the full-resolution line so a dip under water is never
+ * missed. Roads and rail share the graph; edges carry their class so the
+ * router can keep trucks off the railway.
+ */
+function buildGraph(ways, { elevation, width, height }, hand) {
+  const handAt = (lon, lat) => {
+    const col = Math.floor(((lon - AOI.west) / (AOI.east - AOI.west)) * width);
+    const row = Math.floor(((AOI.north - lat) / (AOI.north - AOI.south)) * height);
+    if (col < 0 || row < 0 || col >= width || row >= height) return 255;
+    const index = row * width + col;
+    return elevation[index] <= 0 ? 255 : hand[index];
+  };
+  const metresBetween = (a, b) =>
+    Math.hypot(
+      (b.lon - a.lon) * metresPerDegLon((a.lat + b.lat) / 2),
+      (b.lat - a.lat) * METRES_PER_DEG_LAT,
+    );
+
+  const uses = new Map();
+  for (const way of ways) {
+    for (const id of way.nodes) uses.set(id, (uses.get(id) ?? 0) + 1);
+  }
+
+  const nodes = [];
+  const nodeIndex = new Map();
+  const nodeFor = (id, point) => {
+    let index = nodeIndex.get(id);
+    if (index === undefined) {
+      index = nodes.length;
+      nodeIndex.set(id, index);
+      nodes.push([Number(point.lon.toFixed(5)), Number(point.lat.toFixed(5))]);
+    }
+    return index;
+  };
+
+  const edges = [];
+  for (const way of ways) {
+    const klass = way.tags.railway === 'rail' ? 'rail' : way.tags.highway;
+    const bridge = Boolean(way.tags.bridge && way.tags.bridge !== 'no');
+    const last = way.nodes.length - 1;
+    let start = 0;
+    let sinceSplit = 0;
+    for (let i = 1; i <= last; i += 1) {
+      sinceSplit += metresBetween(way.geometry[i - 1], way.geometry[i]) / 1000;
+      const isJunction = i === last || uses.get(way.nodes[i]) > 1;
+      // Long runs between junctions are cut into ~1 km pieces so the route
+      // wave and the blocked marks resolve where the water actually is.
+      const isSplit = !isJunction && sinceSplit >= MAX_EDGE_KM;
+      if (!isJunction && !isSplit) continue;
+      sinceSplit = 0;
+      const a = nodeFor(way.nodes[start], way.geometry[start]);
+      const b = nodeFor(way.nodes[i], way.geometry[i]);
+
+      // Drawn geometry: the run simplified to ~55 m, endpoints always kept.
+      const points = [];
+      let kept = null;
+      for (let j = start; j <= i; j += 1) {
+        const point = way.geometry[j];
+        if (
+          j === start ||
+          j === i ||
+          Math.hypot(point.lat - kept.lat, point.lon - kept.lon) >= SIMPLIFY_DEG
+        ) {
+          points.push([Number(point.lon.toFixed(5)), Number(point.lat.toFixed(5))]);
+          kept = point;
+        }
+      }
+
+      // HAND profile every ~30 m along the drawn polyline. offsets[k] is the
+      // profile index of point k, so the samples of segment k are
+      // profile[offsets[k] .. offsets[k + 1]]; the renderer and the router
+      // read the same numbers.
+      const profile = [handAt(points[0][0], points[0][1])];
+      const offsets = [0];
+      let km = 0;
+      for (let k = 1; k < points.length; k += 1) {
+        const [lon0, lat0] = points[k - 1];
+        const [lon1, lat1] = points[k];
+        const length = metresBetween({ lon: lon0, lat: lat0 }, { lon: lon1, lat: lat1 });
+        km += length / 1000;
+        const samples = Math.max(1, Math.ceil(length / HAND_SAMPLE_METRES));
+        for (let s = 1; s <= samples; s += 1) {
+          const u = s / samples;
+          profile.push(handAt(lon0 + (lon1 - lon0) * u, lat0 + (lat1 - lat0) * u));
+        }
+        offsets.push(profile.length - 1);
+      }
+
+      if (a !== b && km > 0) {
+        edges.push({
+          a,
+          b,
+          klass,
+          bridge,
+          km: Number(km.toFixed(3)),
+          handDm: Math.min(...profile),
+          points,
+          profile,
+          offsets,
+        });
+      }
+      start = i;
+    }
+  }
+
+  const roadNodes = new Set();
+  for (const edge of edges) {
+    if (edge.klass !== 'rail') {
+      roadNodes.add(edge.a);
+      roadNodes.add(edge.b);
+    }
+  }
+  const samples = edges.reduce((sum, edge) => sum + edge.profile.length, 0);
+  log('graph', nodes.length, 'nodes,', edges.length, 'edges,', roadNodes.size, 'road nodes,', samples, 'HAND samples');
+  return { nodes, edges, roadNodes };
+}
+
+/** The place node the truck starts from, snapped onto the road graph. */
+function pickDepot(places, graph) {
+  const place =
+    places.find((entry) => entry.name === 'Kuala Krai' && entry.place === 'town') ??
+    places.find((entry) => entry.name === 'Kuala Krai');
+  if (!place) throw new Error('no "Kuala Krai" place node in the AOI');
+  let best = null;
+  for (const index of graph.roadNodes) {
+    const [lon, lat] = graph.nodes[index];
+    const distance = Math.hypot(
+      (lon - place.lon) * metresPerDegLon(place.lat),
+      (lat - place.lat) * METRES_PER_DEG_LAT,
+    );
+    if (!best || distance < best.distance) best = { distance, index };
+  }
+  const [lon, lat] = graph.nodes[best.index];
+  log('depot', place.name, 'snapped', Math.round(best.distance), 'm to node', best.index);
+  return { lon, lat, node: best.index, name: place.name };
+}
 
 async function bakePlaces() {
   const data = await overpass(
@@ -639,14 +773,26 @@ async function bakeHouses({ elevation, width, height }, hand, places) {
   };
 }
 
+const CANDIDATE_COUNT = 30;
+const CANDIDATE_MIN_ABOVE_DATUM = 40; // metres
+const CANDIDATE_MAX_ABOVE_DATUM = 350; // metres
+const CANDIDATE_MIN_HAND_DM = 30; // dry at every modelled level
+const CANDIDATE_SETTLEMENT_METRES = 4000;
+const CANDIDATE_SPACING_METRES = 1000;
+const CANDIDATE_MAX_ROAD_METRES = 300; // the truck parks here; no hike to the site
+// A cell-on-cell (~62 m) tower-on-a-truck needs near-level ground: the site
+// and every 30 m neighbour must be under this slope. Removes hillsides that
+// score well on line of sight but could never take a mast.
+const CANDIDATE_MAX_SLOPE_DEG = 10;
+
 /**
- * Picks the portable-tower candidate: the highest ground that is still close
- * to a settlement, dry at any modelled flood level, and low enough above the
- * floodplain to be reachable. Heights are measured from the floodplain datum
- * rather than sea level so the same rule works for an inland valley.
- * Deterministic, so the concept always opens on the same site.
+ * Picks the pool of portable-tower candidates: dry high ground close to a
+ * settlement and to a road, spread at least a kilometre apart. Heights are
+ * measured from the floodplain datum rather than sea level so the same rule
+ * works for an inland valley; towns pull harder than villages, as before.
+ * Greedy by score, so candidates[0] is the single best site. Deterministic.
  */
-function pickTowerSite({ elevation, width, height }, hand, places) {
+function pickCandidates({ elevation, width, height }, hand, places, graph) {
   // Floodplain datum: median height of ground within 2 m of a channel.
   const plain = [];
   for (let index = 0; index < elevation.length; index += 1) {
@@ -656,21 +802,56 @@ function pickTowerSite({ elevation, width, height }, hand, places) {
   const datum = plain[Math.floor(plain.length / 2)] ?? 0;
   log('floodplain datum', datum, 'm');
 
-  // Settlements in grid space; towns pull three times harder than villages.
+  const cellMetres = 30.87;
   const anchors = places.map((place) => ({
     row: ((AOI.north - place.lat) / (AOI.north - AOI.south)) * height,
     col: ((place.lon - AOI.west) / (AOI.east - AOI.west)) * width,
     scale: place.place === 'town' ? 1 / 3 : 1,
   }));
-  const radiusCells = 6000 / 30.87;
+  const radiusCells = CANDIDATE_SETTLEMENT_METRES / cellMetres;
 
-  let best = null;
+  // Slope from the steepest of the eight neighbours; a cell counts as
+  // buildable only if it and its ring of neighbours are all gentle.
+  const maxRise = Math.tan((CANDIDATE_MAX_SLOPE_DEG * Math.PI) / 180) * cellMetres;
+  const gentle = (row, col) => {
+    if (row < 1 || col < 1 || row >= height - 1 || col >= width - 1) return false;
+    const centre = elevation[row * width + col];
+    for (let dr = -1; dr <= 1; dr += 1) {
+      for (let dc = -1; dc <= 1; dc += 1) {
+        if (dr === 0 && dc === 0) continue;
+        const rise = Math.abs(elevation[(row + dr) * width + col + dc] - centre);
+        if (rise > maxRise * Math.hypot(dr, dc)) return false;
+      }
+    }
+    return true;
+  };
+  const buildable = (row, col) => {
+    for (let dr = -1; dr <= 1; dr += 1) {
+      for (let dc = -1; dc <= 1; dc += 1) {
+        if (!gentle(row + dr, col + dc)) return false;
+      }
+    }
+    return true;
+  };
+
+  // Every eligible cell with its score; the greedy pass below spreads them.
+  const eligible = [];
+  let steepRejected = 0;
   for (let row = 0; row < height; row += 1) {
     for (let col = 0; col < width; col += 1) {
       const index = row * width + col;
       const value = elevation[index];
-      if (value < datum + 40 || value > datum + 350) continue;
-      if (hand[index] < 30) continue;
+      if (
+        value < datum + CANDIDATE_MIN_ABOVE_DATUM ||
+        value > datum + CANDIDATE_MAX_ABOVE_DATUM
+      ) {
+        continue;
+      }
+      if (hand[index] < CANDIDATE_MIN_HAND_DM) continue;
+      if (!buildable(row, col)) {
+        steepRejected += 1;
+        continue;
+      }
       let distance = Infinity;
       for (const anchor of anchors) {
         const raw = Math.hypot(row - anchor.row, col - anchor.col);
@@ -678,26 +859,70 @@ function pickTowerSite({ elevation, width, height }, hand, places) {
         distance = Math.min(distance, raw * anchor.scale);
       }
       if (distance === Infinity) continue;
-      const score = value - datum - distance * 0.35;
-      if (!best || score > best.score)
-        best = { score, row, col, elevation: value };
+      eligible.push({ score: value - datum - distance * 0.35, row, col, index });
     }
   }
-  if (!best) throw new Error('no tower candidate within 6 km of a settlement');
+  eligible.sort((a, b) => b.score - a.score);
+  log('candidate cells', eligible.length, '· rejected as too steep', steepRejected);
 
-  const lon = AOI.west + (best.col / width) * (AOI.east - AOI.west);
-  const lat = AOI.north - (best.row / height) * (AOI.north - AOI.south);
-  let nearest = null;
-  for (const place of places) {
-    const distance = Math.hypot(place.lon - lon, place.lat - lat);
-    if (!nearest || distance < nearest.distance) nearest = { distance, place };
+  // Nearest road: closest vertex of any non-rail edge; the candidate's route
+  // ends at that edge's nearer endpoint.
+  const roadVertices = [];
+  for (const edge of graph.edges) {
+    if (edge.klass === 'rail') continue;
+    const [aLon, aLat] = graph.nodes[edge.a];
+    for (const [lon, lat] of edge.points) {
+      const [bLon, bLat] = graph.nodes[edge.b];
+      const toA = Math.hypot(lon - aLon, lat - aLat);
+      const toB = Math.hypot(lon - bLon, lat - bLat);
+      roadVertices.push({ lon, lat, node: toA <= toB ? edge.a : edge.b });
+    }
   }
-  return {
-    lon: Number(lon.toFixed(5)),
-    lat: Number(lat.toFixed(5)),
-    elevation: best.elevation,
-    name: nearest?.place.name ?? 'Candidate site',
+  const nearestRoad = (lon, lat) => {
+    const kx = metresPerDegLon(lat);
+    let best = null;
+    for (const vertex of roadVertices) {
+      const distance = Math.hypot(
+        (vertex.lon - lon) * kx,
+        (vertex.lat - lat) * METRES_PER_DEG_LAT,
+      );
+      if (!best || distance < best.distance) best = { distance, node: vertex.node };
+    }
+    return best;
   };
+
+  const spacingCells = CANDIDATE_SPACING_METRES / cellMetres;
+  const chosen = [];
+  for (const cell of eligible) {
+    if (chosen.length >= CANDIDATE_COUNT) break;
+    const crowded = chosen.some(
+      (other) => Math.hypot(other.row - cell.row, other.col - cell.col) < spacingCells,
+    );
+    if (crowded) continue;
+    const lon = AOI.west + (cell.col / width) * (AOI.east - AOI.west);
+    const lat = AOI.north - (cell.row / height) * (AOI.north - AOI.south);
+    const road = nearestRoad(lon, lat);
+    if (!road || road.distance > CANDIDATE_MAX_ROAD_METRES) continue;
+    let nearest = null;
+    for (const place of places) {
+      const distance = Math.hypot(place.lon - lon, place.lat - lat);
+      if (!nearest || distance < nearest.distance) nearest = { distance, place };
+    }
+    chosen.push({
+      row: cell.row,
+      col: cell.col,
+      lon: Number(lon.toFixed(5)),
+      lat: Number(lat.toFixed(5)),
+      elevation: elevation[cell.index],
+      handDm: hand[cell.index],
+      name: nearest?.place.name ?? 'Candidate site',
+      roadNode: road.node,
+      nearestRoadM: Math.round(road.distance),
+    });
+  }
+  if (chosen.length === 0) throw new Error('no tower candidate found');
+  log('candidates', chosen.length, '· best', chosen[0].name, chosen[0].elevation + ' m');
+  return chosen.map(({ row: _row, col: _col, ...candidate }) => candidate);
 }
 
 // --- Main ------------------------------------------------------------------
@@ -735,10 +960,20 @@ async function main() {
   );
   await writeFile(path.join(OUT, 'hand.bin'), Buffer.from(meshHand.buffer));
 
-  const roads = [...(await bakeRoads()), ...(await bakeRails())];
+  const ways = [
+    ...(await fetchRoads()),
+    ...(await fetchMinorRoads()),
+    ...(await fetchRails()),
+  ];
+  const graph = buildGraph(ways, grid, hand);
+  await writeFile(
+    path.join(OUT, 'roads.json'),
+    JSON.stringify({ nodes: graph.nodes, edges: graph.edges }),
+  );
   const places = await bakePlaces();
-  const towerSite = pickTowerSite(grid, hand, places);
-  log('tower candidate', towerSite.name, towerSite.elevation + ' m');
+  const depot = pickDepot(places, graph);
+  const candidates = pickCandidates(grid, hand, places, graph);
+  const towerSite = candidates[0];
   const houses = await bakeHouses(grid, hand, places);
   await writeFile(path.join(OUT, 'houses.bin'), Buffer.from(houses.data.buffer));
   await bakeImagery();
@@ -754,8 +989,14 @@ async function main() {
       projection: 'epsg3857',
     },
     drainageCells: DRAINAGE_CELLS,
-    roads,
+    roads: {
+      file: 'roads.json',
+      nodes: graph.nodes.length,
+      edges: graph.edges.length,
+    },
     places,
+    depot,
+    candidates,
     towerSite,
     houses: {
       file: 'houses.bin',
