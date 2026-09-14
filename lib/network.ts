@@ -1,0 +1,185 @@
+/**
+ * Existing-network failure model. For every baked site: is it up, on battery
+ * or down right now, and when — and why — does the forecast take it down.
+ *
+ * Three mechanisms, each an illustrative stand-in for what an operator's NOC
+ * would know per site:
+ *   inundation — the cabinet goes under when the river passes the site's HAND;
+ *   power      — grid fails with the flood; the site runs on battery until the
+ *                access road is cut and nobody can refuel; genset sites get one
+ *                refuelling's worth of extra hours;
+ *   backhaul   — a site dies when its backhaul parent dies (fibre along a cut
+ *                road, or a dark microwave hop).
+ *
+ * Runtime imports use .ts extensions so scripts/check-network.mjs can load
+ * this module straight into Node.
+ */
+
+import type { FloodCurve } from './forecast.ts';
+import { routeFrom } from './routing.ts';
+import type { Site, TerrainData } from './terrain-field.ts';
+
+// --- Constants (illustrative) ------------------------------------------------
+/** Hours a site runs on battery after the grid drops. Real: per-site runway from the operator's NOC. */
+export const BATTERY_HOURS = 6;
+/** Extra hours a genset buys — one tank, one refuelling before the road closes. Real: tank size and refuelling contract. */
+export const GENSET_HOURS = 12;
+/** Access is judged from the depot: a site is refuellable while the depot can still reach its road node. */
+export const ACCESS_FROM_DEPOT = true;
+
+export type SiteStatus = 'up' | 'battery' | 'down';
+export type FailureCause = 'inundation' | 'power' | 'backhaul' | 'manual';
+
+export type NetworkSiteState = {
+  id: string;
+  site: Site;
+  /** Status right now (hour 0), after any officer override. */
+  status: SiteStatus;
+  /** Forecast hour the site goes dark, or null if it survives the horizon. */
+  failureHour: number | null;
+  failureCause: FailureCause | null;
+  /** Hour the access road is cut (unreachable from the depot), or null. */
+  accessCutHour: number | null;
+  /** Hour the cabinet floods, or null. */
+  inundationHour: number | null;
+  /** True when the officer has forced the status. */
+  manual: boolean;
+};
+
+export type NetworkAssessment = {
+  sites: NetworkSiteState[];
+  /** Number of sites dark at a (fractional) forecast hour. */
+  darkAt: (hour: number) => number;
+  /** Ids of sites still up (or on battery) at a forecast hour. */
+  liveAt: (hour: number) => string[];
+  summary: { total: number; up: number; battery: number; down: number };
+};
+
+export type Overrides = Record<string, SiteStatus | undefined>;
+
+/**
+ * Assesses every site against the river curve. `overrides` win over the
+ * model: 'down' means dark now; 'battery' means on battery now (dies after
+ * BATTERY_HOURS unless the model says sooner); 'up' means the officer has
+ * confirmed it, so only failures the model puts in the future still apply.
+ */
+export function assessNetwork(
+  terrain: TerrainData,
+  curve: FloodCurve,
+  overrides: Overrides = {},
+): NetworkAssessment {
+  const { meta, graph } = terrain;
+  const hours = curve.levels.length;
+
+  // Access from the depot per hour: one Dijkstra per forecast hour is cheap
+  // on a ~1,300-edge graph and answers "can a fuel truck still get there?".
+  const reachableByHour: Set<number>[] = [];
+  for (let h = 0; h < hours; h += 1) {
+    const { distance } = routeFrom(graph.edges, meta.depot.node, curve.levels[h]!);
+    reachableByHour.push(new Set(distance.keys()));
+  }
+  const accessCutHour = (site: Site) => {
+    if (!ACCESS_FROM_DEPOT) return null;
+    for (let h = 0; h < hours; h += 1) {
+      if (!reachableByHour[h]!.has(site.accessNode)) return h;
+    }
+    return null;
+  };
+  const inundationHour = (site: Site) => {
+    const cabinet = site.handDm >= 255 ? Infinity : site.handDm / 10;
+    for (let h = 0; h < hours; h += 1) {
+      if (curve.levelAt(h) > cabinet) return h;
+    }
+    return null;
+  };
+
+  const byId = new Map(meta.sites.map((site) => [site.id, site]));
+  const modelFailure = new Map<string, { hour: number | null; cause: FailureCause | null }>();
+  const accessCut = new Map<string, number | null>();
+  const flooded = new Map<string, number | null>();
+  const visiting = new Set<string>();
+
+  const failureOf = (id: string): { hour: number | null; cause: FailureCause | null } => {
+    const cached = modelFailure.get(id);
+    if (cached) return cached;
+    const site = byId.get(id);
+    if (!site) return { hour: null, cause: null };
+    if (visiting.has(id)) return { hour: null, cause: null }; // backhaul cycle guard
+    visiting.add(id);
+
+    const wet = inundationHour(site);
+    flooded.set(id, wet);
+    const cut = accessCutHour(site);
+    accessCut.set(id, cut);
+    const runway = (site.power.batteryHours ?? BATTERY_HOURS) + (site.power.genset ? GENSET_HOURS : 0);
+    const power = cut === null ? null : cut + runway;
+    const parent = site.backhaul.parent ? failureOf(site.backhaul.parent) : { hour: null, cause: null };
+
+    // Earliest wins; ties resolve in this order so the cause is deterministic.
+    const candidates: Array<[number | null, FailureCause]> = [
+      [wet, 'inundation'],
+      [power, 'power'],
+      [parent.hour, 'backhaul'],
+    ];
+    let best: { hour: number | null; cause: FailureCause | null } = { hour: null, cause: null };
+    for (const [hour, cause] of candidates) {
+      if (hour === null) continue;
+      if (best.hour === null || hour < best.hour) best = { hour, cause };
+    }
+    // Beyond the forecast horizon counts as surviving it.
+    if (best.hour !== null && best.hour >= hours) best = { hour: null, cause: null };
+    visiting.delete(id);
+    modelFailure.set(id, best);
+    return best;
+  };
+
+  const sites: NetworkSiteState[] = meta.sites.map((site) => {
+    const model = failureOf(site.id);
+    const cut = accessCut.get(site.id) ?? null;
+    const override = overrides[site.id];
+    let status: SiteStatus =
+      model.hour !== null && model.hour <= 0 ? 'down' : cut !== null && cut <= 0 ? 'battery' : 'up';
+    let failureHour = model.hour;
+    let failureCause = model.cause;
+    if (override === 'down') {
+      status = 'down';
+      failureHour = 0;
+      failureCause = 'manual';
+    } else if (override === 'battery') {
+      status = 'battery';
+      const runway = site.power.batteryHours ?? BATTERY_HOURS;
+      if (failureHour === null || failureHour > runway) {
+        failureHour = runway;
+        failureCause = 'manual';
+      }
+    } else if (override === 'up') {
+      status = 'up';
+      if (failureHour !== null && failureHour <= 0) {
+        failureHour = null;
+        failureCause = null;
+      }
+    }
+    return {
+      id: site.id,
+      site,
+      status,
+      failureHour,
+      failureCause,
+      accessCutHour: cut,
+      inundationHour: flooded.get(site.id) ?? null,
+      manual: override !== undefined,
+    };
+  });
+
+  const darkAt = (hour: number) =>
+    sites.filter((s) => s.failureHour !== null && s.failureHour <= hour).length;
+  const liveAt = (hour: number) =>
+    sites.filter((s) => s.failureHour === null || s.failureHour > hour).map((s) => s.id);
+  const summary = {
+    total: sites.length,
+    up: sites.filter((s) => s.status === 'up').length,
+    battery: sites.filter((s) => s.status === 'battery').length,
+    down: sites.filter((s) => s.status === 'down').length,
+  };
+  return { sites, darkAt, liveAt, summary };
+}

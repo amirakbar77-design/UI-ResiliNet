@@ -37,7 +37,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Slider } from '@/components/ui/slider';
 import { Switch } from '@/components/ui/switch';
-import type { RouteRun, View } from '@/components/terrain-3d';
+import type { RouteRun, SiteMarkerState, View } from '@/components/terrain-3d';
 import {
   type FloodCurve,
   type Forecast,
@@ -46,6 +46,13 @@ import {
   MAX_LEVEL,
   MIN_LEVEL,
 } from '@/lib/forecast';
+import {
+  assessNetwork,
+  type FailureCause,
+  type NetworkAssessment,
+  type Overrides,
+  type SiteStatus,
+} from '@/lib/network';
 import { evaluateRoutes, type RouteEvaluation } from '@/lib/routing';
 import { assessSites, type SiteAssessment } from '@/lib/sites';
 import { clamp, type TerrainData, terrainResource } from '@/lib/terrain-field';
@@ -404,6 +411,8 @@ function TerrainStage({
   winnerId,
   previewId,
   onPreview,
+  siteStates,
+  onSiteTap,
   resetSignal,
 }: {
   layers: Record<LayerKey, boolean>;
@@ -420,6 +429,8 @@ function TerrainStage({
   winnerId: string | null;
   previewId: string | null;
   onPreview: (id: string) => void;
+  siteStates: Record<string, SiteMarkerState>;
+  onSiteTap: (id: string) => void;
   resetSignal: number;
 }) {
   return (
@@ -443,6 +454,8 @@ function TerrainStage({
           winnerId={winnerId}
           previewId={previewId}
           onPreview={onPreview}
+          siteStates={siteStates}
+          onSiteTap={onSiteTap}
           resetSignal={resetSignal}
         />
       </Suspense>
@@ -506,11 +519,13 @@ function GaugeControl({
   gauge,
   setGauge,
   now,
+  network,
   onNext,
 }: {
   gauge: number;
   setGauge: (value: number) => void;
   now: number | null;
+  network: NetworkAssessment | null;
   onNext: () => void;
 }) {
   const aboveDanger = gauge - GAUGE_DANGER;
@@ -587,6 +602,22 @@ function GaugeControl({
             ? `${aboveDanger.toFixed(1)} m above danger level`
             : `${(-aboveDanger).toFixed(1)} m below danger level`}
         </p>
+        {network && (
+          <p
+            className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-300 tabular-nums"
+            aria-live="polite"
+          >
+            <span>{network.summary.total} sites</span>
+            <span className="flex items-center gap-1.5">
+              <span className="size-2 rounded-full bg-amber-400" />
+              {network.summary.battery} on battery
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="size-2 rounded-full bg-red-500" />
+              {network.summary.down} down
+            </span>
+          </p>
+        )}
       </div>
 
       <Button
@@ -622,6 +653,7 @@ function ForecastTimeline({
   setHour,
   now,
   floor,
+  network,
   onNext,
 }: {
   forecast: Forecast;
@@ -631,6 +663,7 @@ function ForecastTimeline({
   now: number | null;
   /** Level the river is at right now, from the gauge. */
   floor: number;
+  network: NetworkAssessment | null;
   onNext: () => void;
 }) {
   const [playing, setPlaying] = useState(false);
@@ -678,6 +711,33 @@ function ForecastTimeline({
 
   const timeLabels: number[] = [];
   for (let h = 0; h <= maxHour; h += 3) timeLabels.push(h);
+  // Site failures as ticks on the baseline, fanned out when several share an hour.
+  const tickColor: Record<FailureCause, string> = {
+    inundation: 'rgb(248 113 113)',
+    power: 'rgb(251 191 36)',
+    backhaul: 'rgb(148 163 184)',
+    manual: 'rgb(56 189 248)',
+  };
+  const failureTicks: { x: number; color: string; title: string }[] = [];
+  if (network) {
+    const byHour = new Map<number, typeof network.sites>();
+    for (const s of network.sites) {
+      if (s.failureHour === null || s.failureHour > maxHour) continue;
+      const list = byHour.get(s.failureHour) ?? [];
+      list.push(s);
+      byHour.set(s.failureHour, list);
+    }
+    for (const [h, list] of byHour) {
+      list.forEach((s, i) => {
+        failureTicks.push({
+          x: x(h) + (i - (list.length - 1) / 2) * 2.5,
+          color: tickColor[s.failureCause ?? 'manual'],
+          title: `${s.site.name}: ${s.failureCause} at ${clockLabel(now, h)}`,
+        });
+      });
+    }
+  }
+  const darkNow = network ? network.darkAt(hour) : 0;
   const peakTagWidth = 74;
   const peakTagX = clamp(x(peakHour) - peakTagWidth / 2, CHART_ML, CHART_W - CHART_MR - peakTagWidth);
   const peakTagY = Math.max(2, y(peakLevel) - 22);
@@ -710,6 +770,14 @@ function ForecastTimeline({
               </span>
             )}
           </p>
+          {network && (
+            <p className="mt-0.5 text-[11px] text-slate-400 tabular-nums">
+              by {clockLabel(now, hour)} ·{' '}
+              <span className={darkNow > 0 ? 'font-semibold text-red-300' : 'text-slate-300'}>
+                {darkNow} of {network.summary.total} sites dark
+              </span>
+            </p>
+          )}
         </div>
         <Button
           type="button"
@@ -876,6 +944,21 @@ function ForecastTimeline({
           >
             Peak · {peakLevel.toFixed(1)} m
           </text>
+          {/* site failures: a tick per site at the hour it goes dark */}
+          {failureTicks.map((tick, i) => (
+            <line
+              key={i}
+              x1={tick.x}
+              x2={tick.x}
+              y1={baseline - 9}
+              y2={baseline - 1}
+              stroke={tick.color}
+              strokeWidth={2}
+              strokeLinecap="round"
+            >
+              <title>{tick.title}</title>
+            </line>
+          ))}
           {/* selected hour */}
           <line
             x1={x(hour)}
@@ -1071,6 +1154,7 @@ function StageContent({
   routesReady,
   plannedLevel,
   plannedLabel,
+  network,
   onStartRoutes,
   onSkipRoutes,
   onNext,
@@ -1111,6 +1195,7 @@ function StageContent({
             gauge={gauge}
             setGauge={setGauge}
             now={now}
+            network={network}
             onNext={onNext}
           />
         )}
@@ -1179,6 +1264,7 @@ type StageProps = {
   routesReady: boolean;
   plannedLevel: number;
   plannedLabel: string;
+  network: NetworkAssessment | null;
   onStartRoutes: () => void;
   onSkipRoutes: () => void;
   onNext: () => void;
@@ -1310,6 +1396,8 @@ export function ResilinetDashboard() {
   const [forecast, setForecast] = useState<Forecast | null>(null);
   // The same baked assets the scene uses; needed here for routing and sites.
   const [terrain, setTerrain] = useState<TerrainData | null>(null);
+  // Officer overrides of site status — how NOC alarms would enter later.
+  const [siteOverrides, setSiteOverrides] = useState<Overrides>({});
   const [route, setRoute] = useState<RouteState | null>(null);
   // null until the officer picks an hour; the curve's peak is the default.
   const [chosenHour, setChosenHour] = useState<number | null>(null);
@@ -1353,6 +1441,34 @@ export function ResilinetDashboard() {
     [forecast, gauge],
   );
   const forecastHour = chosenHour ?? curve?.peakHour() ?? 0;
+
+  // Existing-network status and failure hours follow the gauge and the curve.
+  const network = useMemo(
+    () => (terrain && curve ? assessNetwork(terrain, curve, siteOverrides) : null),
+    [terrain, curve, siteOverrides],
+  );
+  const siteStates = useMemo(() => {
+    const states: Record<string, SiteMarkerState> = {};
+    for (const s of network?.sites ?? []) {
+      states[s.id] = {
+        status: s.status,
+        cause: s.failureCause,
+        failureHour: s.failureHour,
+        manual: s.manual,
+      };
+    }
+    return states;
+  }, [network]);
+  const onSiteTap = useCallback((id: string) => {
+    setSiteOverrides((current) => {
+      const order: (SiteStatus | undefined)[] = [undefined, 'up', 'battery', 'down'];
+      const next = order[(order.indexOf(current[id]) + 1) % order.length];
+      const copy = { ...current };
+      if (next === undefined) delete copy[id];
+      else copy[id] = next;
+      return copy;
+    });
+  }, []);
 
   const now = useClock();
   // Now floods from the gauge; Forecast and Site from the curve at the chosen
@@ -1469,6 +1585,7 @@ export function ResilinetDashboard() {
     routesReady,
     plannedLevel,
     plannedLabel,
+    network,
     onStartRoutes,
     onSkipRoutes,
     onNext,
@@ -1491,6 +1608,8 @@ export function ResilinetDashboard() {
         winnerId={route?.sitesDone ? route.winnerId : null}
         previewId={route?.previewId ?? null}
         onPreview={onPreview}
+        siteStates={siteStates}
+        onSiteTap={onSiteTap}
         resetSignal={resetSignal}
       />
       <TopBar stage={stage} setStage={changeStage} />
@@ -1504,6 +1623,7 @@ export function ResilinetDashboard() {
           setHour={setChosenHour}
           now={now}
           floor={gaugeToHandLevel(gauge)}
+          network={network}
           onNext={onNext}
         />
       )}

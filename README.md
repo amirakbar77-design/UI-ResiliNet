@@ -56,6 +56,18 @@ The bake writes `sites` to `terrain.json` from two sources. OpenStreetMap knows 
 
 Each site carries what the failure model needs, all of it assumptions until an operator supplies real figures: a 45 m mast unless OSM tags a height; grid power with a **6 h battery**, plus a **genset** for sites within 2.5 km of Kuala Krai town; the road-graph node it is reached from; and a backhaul parent by a simple rule — sites within 1 km of the trunk or primary road are **fibre** and chain toward the Kuala Krai hub (the site nearest the town), every other site is a **microwave** link to the nearest site that can see its mast (a straight ray over the DEM with 5 m clearance; the nearest site regardless if none can). Real backhaul topology is operator-confidential; this rule is the stand-in.
 
+## Existing-site failure model
+
+`lib/network.ts` decides, for every existing site, whether it is up, on battery or down right now and when the forecast takes it down — the earliest of three mechanisms, each a stand-in for what an operator's NOC would know per site:
+
+- **inundation** — the first forecast hour the river passes the site's HAND (the cabinet goes under);
+- **power** — the grid is assumed to fail with the flood; the site runs on battery (`BATTERY_HOURS` = 6, illustrative) and is refuellable only while the depot can still reach its access road (one Dijkstra per forecast hour over the road graph); when the road closes the clock starts, and a genset site gets one refuelling's worth of extra hours (`GENSET_HOURS` = 12);
+- **backhaul** — a site dies when its parent dies (fibre along a cut road, a dark microwave hop); the hub has no parent and never loses backhaul.
+
+Failures beyond the forecast horizon count as surviving it. The officer can force any site's status by tapping its marker (auto → up → battery → down); an override wins over the model and is tagged *manual* — this is where NOC alarms would enter. Status dots (green / amber / red) on the Now stage follow the gauge; on the Forecast stage each failure is a tick on the river timeline (red inundation, amber power, grey backhaul, blue manual) and the readout says how many sites are dark by the selected hour. `node scripts/check-network.mjs [gauge]` prints the table.
+
+In this valley every real site sits on dry ground, so inundation is rare and **power after the access road closes** dominates — which is what MCMC reported in November 2024.
+
 ## Site evaluation
 
 `lib/sites.ts`: a candidate is assessed if the route wave reached its road node at today's level. Its score is the number of homes that are under water at the planned hour *and* inside its viewshed — the homes it would reconnect. The winner has the highest count; a tie goes to the shorter road. The card reports the winner's height above the planned flood, road distance from the depot, and the count; the browser console logs the full table.
