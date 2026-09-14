@@ -10,6 +10,8 @@
 - The forecast is a simple, transparent model and is labelled *illustrative*. Honest beats impressive.
 - Motion has a job: fly-up = "think bigger", fly-down = "now decide", wave = "how far can the truck get".
 
+**Two parts.** Steps 0–9 (done) build the flood story: gauge, forecast, fly-up, route wave, candidates, winner. Part 2, Steps 10–19, puts the *network* in — existing sites, how and when they fail, the coverage hole, a backhaul-aware recommendation, real population and evacuation centres, a real ML forecast with an uncertainty band, a 2014 hindcast and a method panel — so the headline number becomes people without signal and the claim is a telecom claim.
+
 **How to use this file.** Paste one step's prompt into Claude Code, let it finish, and run the *You should see* check yourself. If it is not right, redirect with a short follow-up (the *If it's not right* line is the most likely one) before moving to the next step. Every step leaves the app working and `tsc` / lint / build clean, so you can stop after any step.
 
 ---
@@ -229,3 +231,231 @@ Polish: Reset view restarts the whole flow at Now with the gauge reading kept; t
 **You should see:** the winning site highlighted with its coverage, a short card explaining why it won, and a complete run from gauge to winner in under 90 seconds.
 
 **If it's not right:** "Prefer the site closest to the depot when homes are within 10 %", "Show two runners-up in the card", or "Add a 'Send brief' button after all."
+
+---
+
+# Part 2 — Put the network in
+
+Steps 0–9 built a flood story with a telecom label. The number on screen — "cut-off homes" — counts homes under water, which is a hydrology score; a flooded house under a working macro site still has signal. Nothing in the app knows where the existing towers are, so it cannot say a single home has *lost* coverage, cannot say the portable tower adds anything, and assumes "flood ⇒ tower down" when sites actually die from **power loss** (grid out, genset unfuelled because the road is cut) and **backhaul** (fibre on the washed-out bridge, a dark hub). Part 2 fixes the claim without changing the machinery: the flood model, road graph, route wave and viewshed all stay and become *inputs* to a network layer.
+
+**Screen rule for Part 2:** no new panels, no new stages, no new controls. Each act gains one thing inside what is already there — site markers on Now, failure ticks on the Forecast timeline, the hole opening during the Site wave — and the headline number becomes *people without signal*. If a step makes the map feel crowded, hide the thing; do not add a toggle.
+
+**Build order (two months):** Steps 10–13 and 16 in weeks 1–2 (16 is data-only and runs in parallel), 14–15 in week 3, 17–19 in weeks 5–6, then freeze. Weeks 7–8 are rehearsal and deployment; nothing new after week 6.
+
+---
+
+## Step 10 — Existing sites
+
+**Goal:** the map knows where the network is.
+
+**Prompt**
+
+```
+Extend scripts/bake-terrain.mjs with a site layer, written to terrain.json as `sites`.
+
+1. Fetch OSM towers in the AOI via the existing overpass() helper: node/way with man_made=mast, man_made=communications_tower, or man_made=tower + tower:type=communication; keep name, height (tower:height or height), and operator when tagged. Fetch OpenCellID cells for the AOI if an API key is present in the environment (OPENCELLID_KEY; document how to get one in the README) and cluster cell positions within 300 m into one site; skip silently if there is no key.
+
+2. Merge and complete: dedupe OSM and OpenCellID within 300 m; if the result has fewer than 8 sites, add hand-placed sites from a small `SITE_SEEDS` table at the top of the script (one per major settlement on high ground beside a road: Kuala Krai town, Kuala Krai bypass, Manek Urai, Kuala Gris, Dabong, Kemubu, Kuala Balah, Jelawang), each flagged `source: 'seed'` so the UI and README can say they are placeholders. Target 8–12 sites total.
+
+3. Per site record: id, name, lon, lat, elevation, handDm, mastMetres (tagged height, else 45 for seeds), source ('osm' | 'opencellid' | 'seed'), power { grid: true, batteryHours: 6, genset: boolean (true for town sites) }, accessNode (nearest road-graph node, like candidates), and backhaul { parent: id | null, kind: 'fibre' | 'microwave' } built by a simple rule: sites within 1 km of the trunk road are 'fibre' with parent = the next fibre site toward Kuala Krai along the road; every other site is 'microwave' with parent = the nearest site that has line of sight to it (use the viewshed march at bake time; fall back to nearest if none), and the Kuala Krai town site is the hub (parent null). Write the rule and the seeds to the README as assumptions.
+
+4. lib/terrain-field.ts: add the Site type and `sites` to TerrainMeta. In components/terrain-3d.tsx add a 'site' anchor kind drawn as a small mast icon marker with a status dot (green by default) and the name; visible on the ground and site views, hidden in the overview. Rename the "Current Tower Status" layer toggle to "Existing sites" and make it control these markers; remove the "New Portable Tower · Place" button from the layer panel (it does nothing).
+
+Run npm run bake:terrain, tsc, oxlint, build; confirm the site markers appear and the layer toggle hides them.
+```
+
+**You should see:** 8–12 mast markers across the valley with green dots, mostly near settlements and the trunk road; the layer list reads "Existing sites"; the dead "Place" button is gone.
+
+**If it's not right:** "Too many sites in Kuala Krai town — cluster within 800 m", "Put a seed site at X", or "Show the backhaul parent as a faint dashed line when a site is hovered."
+
+---
+
+## Step 11 — Failure model and status
+
+**Goal:** the app says when and why each site dies — and lets the officer correct it.
+
+**Prompt**
+
+```
+Create lib/network.ts with `assessSites(terrain, curve, routeClosingHours, options)` returning per site: status now ('up' | 'battery' | 'down'), failureHour (number | null) and failureCause ('inundation' | 'power' | 'backhaul' | null), computed as the earliest of:
+
+- inundation: first hour h where curve.levelAt(h) > site.handDm / 10 (the cabinet goes under);
+- power: the hour the site's access road is cut (from the closing hour of the edge at its accessNode; reuse evaluateRoutes' closingHour, or recompute with lib/routing.ts) plus power.batteryHours; sites with a genset get +12 h (one refuelling); if the access road is already cut now, the site is 'battery' now and fails at now + batteryHours;
+- backhaul: the parent's failureHour (recursively; fibre parents along a cut road fail when that road is cut; microwave parents fail when they fail).
+
+Put the constants (BATTERY_HOURS = 6, GENSET_HOURS = 12) at the top with comments saying they are illustrative and that an operator's NOC would supply real runway per site. Add an `overrides: Record<siteId, 'up' | 'battery' | 'down'>` argument so the officer can force a status; an override wins over the model.
+
+UI, Now stage: the site markers' dots follow status (green up, amber battery, red down); tapping a site marker cycles the override (auto → up → battery → down → auto) with a small "manual" tag when overridden — this is how NOC alarms would enter later. Show one line under the gauge: "9 sites · 2 on battery · 0 down" that updates as the gauge moves.
+
+UI, Forecast stage: draw a small tick on the river timeline at each site's failureHour, red for inundation, amber for power, grey for backhaul, and a readout on the selected hour: "by 02:00 · 5 of 9 sites dark". No new chart; ticks sit on the existing SVG.
+
+Add scripts/check-network.mjs that prints the site table (failure hour and cause at the default gauge). Run tsc, oxlint, build; check the ticks and the status dots.
+```
+
+**You should see:** most sites green now; as the gauge rises, dots turn amber (access cut, on battery) then red; on the Forecast chart, ticks cluster a few hours after the road closures; tapping a site forces its status.
+
+**If it's not right:** "Battery runway 4 h not 6", "Town sites never lose backhaul (they are the hub)", or "Show the cause in the marker label."
+
+---
+
+## Step 12 — The coverage hole
+
+**Goal:** the headline number becomes people without signal, not homes under water.
+
+**Prompt**
+
+```
+In lib/network.ts add `coverageAt(terrain, sites, statusAtHour)` that unions the viewsheds of sites that are up (or on battery) at that hour — reuse viewshedMask with each site's mastMetres and a radius per site kind (9 km macro; use 9 km for all until real data says otherwise) — and returns a covers(lon, lat) test. Define the hole at hour h as homes (Step 14 replaces homes with population) that were covered now and are not covered at h.
+
+Scene: during the Site stage wave, as each site's failureHour is passed by the planned hour, its coverage fan fades from emerald to grey (the fan you already draw; keep the geometry, animate the material colour and opacity). Draw surviving sites' fans faintly. This is the hole: no new layer.
+
+Numbers: replace "reaches N cut-off homes" everywhere with "reconnects N homes without signal" = homes in the hole at the planned hour that the candidate's viewshed covers. The winner card's big number becomes "homes reconnected" with a sub-line "of M without signal at HH:MM". The Site panel readout gains one line: "Without signal at the peak: M homes (2 evacuation centres)" — leave the centres part for Step 15.
+
+Confirm the number no longer changes when the gauge moves unless a site's status changes. Run tsc, oxlint, build.
+```
+
+**You should see:** as the wave plays, one or more site fans go grey and a darker patch of valley is left with no fan over it; the candidates' labels now count homes *in that patch*; a gauge change that fails no site leaves the number alone.
+
+**If it's not right:** "Keep the flooded-homes count as a secondary line", "Grey fans are too visible — drop opacity", or "Use 6 km for village sites."
+
+---
+
+## Step 13 — Re-score the portable site, with backhaul
+
+**Goal:** the recommendation is a telecom recommendation.
+
+**Prompt**
+
+```
+Update lib/sites.ts scoring. A candidate is viable only if: reachable now (unchanged), dry at the planned level (unchanged), buildable (unchanged), and it has BACKHAUL — line of sight from its mast height to at least one site that is still up at the planned hour within 15 km (microwave), computed with viewshedMask from the candidate; record backhaulTo (site id) and the distance. Score = homes reconnected (Step 12), tie → shorter route km.
+
+Add a second recommendation type: for each site whose failureCause is 'power' and whose access road is still open now, compute a "keep alive" option — refuelling it before its road closes keeps its whole coverage. Compare the best keep-alive (homes kept) against the best portable site (homes reconnected). The Site panel's recommendation card shows whichever is larger, with the other as the alternative: "Refuel Manek Urai by 22:00 — keeps 1,240 homes on signal" or "Portable tower at Kuala Balah — reconnects 667 homes · backhaul to Kuala Gris (7.2 km, line of sight)". Draw the backhaul as a thin dashed line from the winner's mast to its parent site; draw the keep-alive option as a pulsing outline on that site.
+
+Update scripts/check-routes.mjs (or add check-sites.mjs) to print both option tables. Run tsc, oxlint, build; do a full run.
+```
+
+**You should see:** the winner card names its backhaul parent and a dashed line shows it; candidates without any surviving site in view never appear; when refuelling a site would keep more people connected than a new tower, the card says so and the tower is the alternative.
+
+**If it's not right:** "Backhaul range 20 km", "Always show both options side by side", or "Weight evacuation centres 20× a home" (after Step 15).
+
+---
+
+## Step 14 — Real population
+
+**Goal:** the objective counts people, not invented houses.
+
+**Prompt**
+
+```
+Add WorldPop to the bake: download the Malaysia 100 m constrained population GeoTIFF for the AOI (document the URL and licence, CC BY 4.0, in the README; cache it in .cache/), crop to the AOI, resample onto the render grid, and write public/terrain/population.bin (Float32 people per cell) with min/max/total in terrain.json. If the GeoTIFF needs a decoder, use the `geotiff` npm package in the bake script only.
+
+Switch every count in lib/network.ts and lib/sites.ts from houses to population: "people without signal", "people reconnected", "people kept on signal". Keep the houses for the 3D visuals only and label them illustrative in the README; the settlement markers show "~N people" from the population raster within 1.2 km instead of home counts.
+
+Update the winner card and Site panel copy. Run the bake, tsc, oxlint, build; compare the new totals with the old home counts in the console for sanity (expect the same ranking, different magnitudes).
+```
+
+**You should see:** the same story with people instead of homes; totals in the thousands; ranking of sites largely unchanged.
+
+**If it's not right:** "Use GHSL instead", "Round people to the nearest 50", or "Show population density as a faint layer in the overview only."
+
+---
+
+## Step 15 — Evacuation centres
+
+**Goal:** the number a district officer acts on.
+
+**Prompt**
+
+```
+Fetch OSM amenity=school, amenity=community_centre and amenity=place_of_worship (surau/mosque halls) in the AOI in the bake and write them to terrain.json as `centres` (name, lon, lat, kind). In Malaysia relief centres (PPS) are almost always schools and halls; label them "likely evacuation centres" in the UI and README, and note that JKM publishes the real list during an event.
+
+lib/network.ts: for each hour, which centres have no signal (not covered by any live site and not covered by the portable tower if placed). Weight centres in the site score: score = people reconnected + CENTRE_WEIGHT × centres reconnected, CENTRE_WEIGHT = 500 (illustrative; a centre is a rescue-coordination point). Show centres as small hollow markers only in the Site stage, red-ringed when without signal at the planned hour; the panel line becomes "Without signal at the peak: 1,900 people · 2 evacuation centres".
+
+Run the bake, tsc, oxlint, build.
+```
+
+**You should see:** a handful of school/hall markers; at the peak one or two are red-ringed; the winner card mentions how many it brings back.
+
+**If it's not right:** "Schools only", "Weight 1,000", or "Hide centre markers until the wave has run."
+
+---
+
+## Step 16 — Real forecasts: WeatherNext 3 live, Nov 2024 replay, Dec 2014 hindcast
+
+**Goal:** no invented rain anywhere. Three dated, sourced inputs run through the same pipeline; the app stays offline.
+
+*What was verified on 14 Sep 2026 (account muhdzaher22@gmail.com, access granted 14 Sep):*
+- **WeatherNext 3 statistics** — `gs://weathernext3_statistics_spatial/weathernext_3_0_0_statistics/zarr/2026_to_present/<YYYYMMDD>_<HH>hr_01_preds/predictions.zarr`, Zarr v3, **requester-pays OFF (free)**, one store per init (24/day; 00/06/12/18Z have 360 hourly leads, interim inits 48). Variables `imerg_tp_1hr_{mean,p10,p25,p50,p75,p90}` (IMERG-calibrated) and `total_precipitation_1hr_*`, units **metres per hour**, on the 0.1° grid (`lat_0p1` 1801 × `lon_0p1` 3600, lon 0–359.9), chunked one lead × global (~26 MB per read). The gcloud user token works via `gcsfs.GCSFileSystem(token=google.oauth2.credentials.Credentials(token))`; zarr's store wrapper cannot serialise that credential, so read chunks directly (`<var>/c/<lead>/0/0`, codecs bytes + zstd) as the probe does. Today's 48 h basin total: 2.6 mm mean, 6.6 mm p90 — a dry day, which Live must show honestly.
+- **Nov 2024 replay** — Earth Engine `projects/gcp-public-data-weathernext/assets/59572747_4_0` (WeatherNext Gen archive 2020-01 → 2026-07), 6-hourly, ~28 km, `total_precipitation_6hr`; issue `2024-11-27T00:00:00Z` has 40 leads (6…240 h). Units unverified: expand the `tp6h` series once (≈0.01 → metres per 6 h).
+- **Dec 2014 hindcast** — Earth Engine `ECMWF/ERA5_LAND/HOURLY`, `total_precipitation_hourly` (metres), 168 images 20–27 Dec 2014, **218 mm basin total** that week.
+- **Basin** — HydroBASINS level 9 (`WWF/HydroSHEDS/v1/Basins/hybas_9`) traced upstream from the Kuala Krai gauge (102.199 E, 5.531 N): 37 polygons, **11,500 km²**. Export it once to `public/terrain/basin.geojson` and use it for every basin mean (the tile-mean in the illustrative file was a hydrology error — the river at Kuala Krai answers to the whole upstream basin).
+
+**Prompt**
+
+```
+On branch barbar. Python lives in .venv-wx (xarray, zarr, gcsfs, zstandard, numpy already installed; gitignored). Do not add a runtime dependency — everything here runs at bake time and writes JSON the app reads offline.
+
+1. scripts/fetch-weathernext.py, from the working probe: read the newest 6-hourly WeatherNext 3 init (or --init YYYYMMDD_HH), leads 1…48, variables imerg_tp_1hr_{mean,p10,p50,p90}, decoding the Zarr v3 chunks directly through gcsfs with the gcloud access token. Cache each decoded basin/tile window in .cache/weathernext/<init>/<var>_<lead>.npy so re-runs are instant. Basin mean = area-weighted mean of the 0.1° cells inside public/terrain/basin.geojson (export the HydroBASINS polygon once with an Earth Engine snippet in the script's docstring; until then use the bbox 101.4–102.5 E, 4.5–5.7 N). Convert m/h → mm/h. Also cut the 16×14 app grid from the 0.1° field by bilinear interpolation of the mean (≈ 4×3 model cells across the tile — real gradient, not convective detail; flag it as such).
+
+2. Write public/forecast-live.json in the existing shape plus: source "Google DeepMind WeatherNext 3 statistics (experimental), IMERG-calibrated total precipitation, init <ISO>", terms: "GDM Real-Time Weather Forecasting Experimental Data Terms (real-time) / CC BY 4.0 (historic)", basin: { name, areaKm2, source: "HydroBASINS v1 level 9" }, catchmentMeanMmPerHour = mean, catchmentMeanQuantiles: { p10, p50, p90 }, spatial: "0.1° ensemble mean interpolated to the tile". Add npm script forecast:live → .venv-wx/bin/python scripts/fetch-weathernext.py.
+
+3. scripts/fetch-replay.py (Earth Engine Python client; document `earthengine authenticate`): (a) Nov 2024 — issue 2024-11-27T00Z from 59572747_4_0, basin mean of total_precipitation_6hr per lead converted to mm/h and spread evenly over each 6 h step, hours 0…72, written to public/forecast-2024.json with source "WeatherNext Gen archive, issue 2024-11-27 00Z" and a lagged-ensemble band from the four preceding issues (p10/p50/p90 across issues for the same valid hour); (b) Dec 2014 — ERA5-Land hourly basin mean for 2014-12-22T06Z … +72 h written to public/forecast-2014.json with source "ERA5-Land reanalysis (observation-based)", no band. Both files keep the 16×14 rain grid by nearest-cell sampling of the coarse field.
+
+4. lib/forecast.ts: add floodBand(forecast, observed) running the leaky store on p10/p50/p90 when catchmentMeanQuantiles is present; loadForecast(mode) for 'live' | 'replay-2024' | 'hindcast-2014'. Retire scripts/make-forecast.mjs to a fallback only (keep the file, note it in the README).
+
+5. UI: one chip beside the "Now · HH:MM" badge — "Live · WeatherNext 3, init 14 Sep 06Z" / "Replay · 27 Nov 2024" / "Hindcast · 22 Dec 2014" — cycling on tap (this is the only new control in Part 2, and it replaces nothing). The clock follows the mode: Live uses the wall clock; Replay/Hindcast show the event's timestamps, and the gauge prefills to the recorded reading for that event (27.0 m default for Live, the InfoBanjir Kuala Krai reading on 27 Nov 2024 00Z and 22 Dec 2014 06Z — look them up; if unavailable, say "reading not found" and keep the default). The river timeline draws the p10–p90 band as a shaded area under the p50 line; the peak tag reads "Peak · 8.9 m (7.5–10.4)". The Site stage plans for the p50 peak; the winner card's dryness line uses p90.
+
+6. README: the three sources with terms and dates, what WeatherNext 3 gives (hourly, ~10 km IMERG-calibrated ensemble statistics, real spread) and does not (convective cells inside the valley; extremes smoothed), the basin definition, and the sentence "on a dry day Live shows no action — that is the system working". Method panel entry in Step 18.
+
+Run forecast:live, both replay fetches, check-forecast on all three files, tsc, oxlint, build. Commit all three JSON files so the demo runs offline.
+```
+
+**You should see:** the mode chip; Live today shows a flat river and "all sites up, no action"; Replay 2024 shows the rain arriving and the curve rising with a shaded band; Hindcast 2014 shows the 218 mm week and the town becoming an island; the forecast source names a real dataset and issue time in every mode.
+
+**If it's not right:** "Plan for the p90 instead", "Band too wide — show p25–p75", "Use total_precipitation instead of the IMERG-calibrated band", or "Cut the live fetch to 24 leads to save time".
+
+---
+
+## Step 17 — 2014 hindcast
+
+**Goal:** the model is checked against the event everyone remembers.
+
+**Prompt**
+
+```
+Add a "Hindcast: December 2014" mode reachable from the Method-library rail icon (Step 18 builds the panel; for now a plain toggle). It sets the gauge to the recorded 34.2 m peak, uses a fixed forecast file (public/forecast-2014.json: ERA5 or WeatherNext historic basin rain for 22–25 Dec 2014 if accessible, else the illustrative file with a clear label), and runs the site failure model and route evaluation. Compare with the record and list hits and misses in the panel: Kemubu railway bridge lost (does the graph cut it?), Kuala Krai isolated by road (does the wave stop at the town?), Kampung Kemubu out of contact for five days (is its site dark?), Maxis/Digi down in Kuala Krai (are the town sites dark?). Print the same table with scripts/check-hindcast.mjs. State the misses plainly; do not tune constants to force hits without saying so in the README.
+```
+
+**You should see:** a short hits/misses list with the model's answer next to the reported fact; at 34.2 m the town is an island and most sites are dark.
+
+**If it's not right:** "Add the 2024 Nov event too", or "Show the hindcast as a badge on the Now stage instead."
+
+---
+
+## Step 18 — Method panel
+
+**Goal:** every number on screen can be traced before a judge asks.
+
+**Prompt**
+
+```
+Build a Method panel behind the "Method library" rail icon (desktop: a wide glass sheet over the map; mobile: full-screen sheet). Sections, each a short table: Real data (SRTM, Sentinel-2, OSM roads/rail/buildings/schools, WorldPop, OpenCellID/OSM sites, WeatherNext) with licence and date; Derived (HAND, viewshed, road graph, route wave) with the algorithm in one line; Assumptions — every constant with its value and where a real one comes from: gauge→HAND mapping, leaky-store constants, embankment allowance, 150 m cut run, slope gate, battery/genset hours, backhaul rule, coverage radius, centre weight; Seeds — hand-placed sites, flagged. Pull the values from the code (export the constants) so the panel cannot drift from the model. Link the hindcast (Step 17). Remove the remaining dead rail icons (Overview, Operator profile, Settings) or make them no-ops with a tooltip "not in this concept".
+```
+
+**You should see:** one panel that answers "what's real?" in under a minute; no dead icons.
+
+---
+
+## Step 19 — Cleanup and rehearsal fixes
+
+**Goal:** nothing on screen that does not earn its place.
+
+**Prompt**
+
+```
+Polish pass before the freeze: settlement pins must not overlap site or winner markers (offset or hide the settlement label when a site marker is within 40 px); the tile edge should not show in the site view (raise the camera or clamp the pivot); the Forecast timeline auto-plays from now to the end once when the stage opens, then settles on the p50 peak (respect prefers-reduced-motion); the Site stage camera glides toward the depot on Start; the winner card lists two runners-up in one line each; mobile pass on every stage; README and the memory note updated; tsc, oxlint, build; a full timed run Now → Forecast → Site in under 90 s with no console errors.
+```
+
+**You should see:** the same three screens, calmer; the timeline plays itself once; nothing overlaps.
+
+**After Step 19 — freeze.** Deploy the static build, write the three-minute script around one sentence — *this is when your network dies, and what to do about it* — rehearse with a stopwatch, drill the questions (where are the towers, why this site, what is real), and cut anything that does not survive rehearsal.
