@@ -42,3 +42,4 @@ next-env.d.ts
 # build-time data cache (raw DEM tiles, imagery tiles)
 .cache/
 trash.md
+notes.md
