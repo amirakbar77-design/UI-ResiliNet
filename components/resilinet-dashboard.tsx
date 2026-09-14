@@ -20,7 +20,6 @@ import {
   Layers3,
   LogOut,
   MapPin,
-  MousePointer2,
   Pause,
   Play,
   RadioTower,
@@ -51,7 +50,7 @@ import { evaluateRoutes, type RouteEvaluation } from '@/lib/routing';
 import { assessSites, type SiteAssessment } from '@/lib/sites';
 import { clamp, type TerrainData, terrainResource } from '@/lib/terrain-field';
 
-type LayerKey = 'coverage' | 'towers' | 'flood' | 'roads' | 'population';
+type LayerKey = 'coverage' | 'towers' | 'sites' | 'flood' | 'roads' | 'population';
 type IconComponent = ComponentType<{
   className?: string;
   'aria-hidden'?: boolean;
@@ -69,7 +68,8 @@ const layerOptions: Array<{
   icon: IconComponent;
 }> = [
   { key: 'coverage', label: 'Network Coverage', icon: Signal },
-  { key: 'towers', label: 'Current Tower Status', icon: RadioTower },
+  { key: 'sites', label: 'Existing sites', icon: RadioTower },
+  { key: 'towers', label: 'Concept tower', icon: Antenna },
   { key: 'flood', label: 'Flood Hazards', icon: Waves },
   { key: 'roads', label: 'Road & Rail Status', icon: Route },
   { key: 'population', label: 'Settlements & Homes', icon: Users },
@@ -497,22 +497,6 @@ function LayerPanel({
             </label>
           ))}
         </div>
-        <button
-          type="button"
-          className="group relative mt-1 flex min-h-11 w-full items-center gap-3 rounded-lg border border-sky-300/20 bg-slate-700/65 px-2.5 text-left text-sm font-medium text-white transition-colors hover:bg-slate-700"
-        >
-          <span className="grid size-6 place-items-center rounded-md bg-sky-400/14 text-sky-300">
-            <RadioTower className="size-4" aria-hidden />
-          </span>
-          <span className="flex-1">New Portable Tower</span>
-          <span className="rounded-md border border-sky-300/20 bg-sky-400/10 px-1.5 py-1 text-[10px] font-bold tracking-[0.09em] text-sky-200 uppercase">
-            Place
-          </span>
-          <MousePointer2
-            className="absolute -bottom-2 -right-1 size-5 fill-slate-950 text-white drop-shadow-lg transition-transform group-hover:-translate-x-1 group-hover:-translate-y-1"
-            aria-hidden
-          />
-        </button>
       </div>
     </aside>
   );
@@ -1274,12 +1258,6 @@ function MobileControls({
                 {label}
               </button>
             ))}
-            <button
-              type="button"
-              className="flex min-h-11 items-center gap-2 rounded-lg bg-emerald-400/12 px-2 text-left text-[11px] font-semibold text-emerald-200"
-            >
-              <RadioTower className="size-3.5" aria-hidden /> New Portable Tower
-            </button>
           </div>
         )}
       </div>
@@ -1322,6 +1300,7 @@ export function ResilinetDashboard() {
   const [layers, setLayers] = useState<Record<LayerKey, boolean>>({
     coverage: true,
     towers: true,
+    sites: true,
     flood: true,
     roads: true,
     population: true,

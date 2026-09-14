@@ -6,7 +6,7 @@
  * context. Nothing here fetches a remote service at runtime.
  */
 
-export type LayerKey = 'coverage' | 'towers' | 'flood' | 'roads' | 'population';
+export type LayerKey = 'coverage' | 'towers' | 'sites' | 'flood' | 'roads' | 'population';
 
 export type Aoi = {
   west: number;
@@ -60,6 +60,31 @@ export type Candidate = {
   nearestRoadM: number;
 };
 
+/** An existing network site: real where OSM/OpenCellID know it, a declared seed elsewhere. */
+export type Site = {
+  id: string;
+  name: string;
+  operator: string | null;
+  lon: number;
+  lat: number;
+  elevation: number;
+  handDm: number;
+  mastMetres: number;
+  source: 'osm' | 'opencellid' | 'seed';
+  power: { grid: boolean; batteryHours: number; genset: boolean };
+  /** Road-graph node the site is reached from, and how far off the road it sits. */
+  accessNode: number;
+  accessRoadM: number;
+  toTownM: number;
+  trunkM: number;
+  backhaul: {
+    /** Site id upstream, or null for the hub. */
+    parent: string | null;
+    kind: 'fibre' | 'microwave';
+    lineOfSight?: boolean;
+  };
+};
+
 export type Place = {
   name: string;
   lon: number;
@@ -85,6 +110,7 @@ export type TerrainMeta = {
   depot: Depot;
   /** Best first; towerSite is candidates[0]. */
   candidates: Candidate[];
+  sites: Site[];
   towerSite: TowerSite;
   houses: { file: string; count: number };
   attribution: string[];

@@ -19,7 +19,7 @@
  *   roads.json     junction-preserving road + rail graph: nodes and edges
  *                  with drawn geometry, length and minimum HAND
  *   terrain.json   grid metadata, attribution, settlements, depot, tower
- *                  candidates
+ *                  candidates, existing network sites
  *
  * Homes are OSM building footprints where they exist; elsewhere they are
  * illustrative houses filling OSM residential areas and clustered around
@@ -925,6 +925,343 @@ function pickCandidates({ elevation, width, height }, hand, places, graph) {
   return chosen.map(({ row: _row, col: _col, ...candidate }) => candidate);
 }
 
+// --- Existing network sites --------------------------------------------------
+
+// Hand-placed placeholder sites, used only to fill gaps where OSM and
+// OpenCellID have nothing: one per major settlement, on high ground beside a
+// road. Flagged source: 'seed' so the UI and README can say so.
+// Positions were picked from the DEM: the highest dry (HAND ≥ 3 m) cell within
+// 300 m of a road near each settlement, so a seed never sits in the river.
+const SITE_SEEDS = [
+  { name: 'Kuala Krai town', lon: 102.1965, lat: 5.5359 },
+  { name: 'Kuala Krai bypass', lon: 102.1798, lat: 5.5261 },
+  { name: 'Manek Urai', lon: 102.2296, lat: 5.3884 },
+  { name: 'Kuala Gris', lon: 102.0528, lat: 5.3638 },
+  { name: 'Dabong', lon: 101.982, lat: 5.3793 },
+  { name: 'Kemubu', lon: 102.054, lat: 5.3523 },
+  { name: 'Kuala Balah', lon: 102.0294, lat: 5.4467 },
+  { name: 'Jelawang', lon: 101.948, lat: 5.3889 },
+];
+const SITE_MIN_COUNT = 8;
+const SITE_MERGE_METRES = 300; // OSM/OpenCellID dedupe
+// OpenCellID positions are where phones heard a cell, each with a single
+// sample, so one macro site spreads into a cloud of points. Cells within
+// SITE_CELL_CLUSTER_METRES are one site; a cluster counts only when at least
+// SITE_MIN_CELLS cells or SITE_MIN_OPERATORS networks corroborate it.
+const SITE_CELL_CLUSTER_METRES = 1200;
+const SITE_MIN_CELLS = 3;
+const SITE_MIN_OPERATORS = 2;
+const SITE_MAX_COUNT = 12; // strongest clusters keep a marker; the rest are noise for this scale
+const SITE_SPACING_METRES = 2500; // one marker per macro-site spacing; picks the strongest cluster in each area
+// A crowd-sourced position is where phones heard the cell, often in the river
+// or on the road; a real macro site stands on dry high ground nearby. Snap
+// each site to the highest cell with HAND ≥ 3 m within this radius.
+const SITE_SNAP_METRES = 500;
+const OPERATORS = { 11: 'TM', 12: 'Maxis', 13: 'Celcom', 16: 'DiGi', 18: 'U Mobile', 19: 'Celcom', 152: 'Yes', 153: 'Webe', 158: 'Celcom' };
+const SITE_TOWN_METRES = 2500; // a site this close to Kuala Krai town gets a genset
+const SITE_DEFAULT_MAST_METRES = 45;
+const SITE_BATTERY_HOURS = 6; // illustrative; an operator's NOC knows the real runway
+const SITE_FIBRE_METRES = 1000; // sites this close to the trunk road are fibre-fed
+const SITE_MICROWAVE_METRES = 15000;
+
+/** OSM masts and communication towers in the AOI (nodes and way centroids). */
+async function fetchOsmTowers() {
+  const data = await overpass(
+    `[out:json][timeout:120];(node["man_made"~"^(mast|communications_tower)$"](${BBOX});way["man_made"~"^(mast|communications_tower)$"](${BBOX});node["man_made"="tower"]["tower:type"="communication"](${BBOX});way["man_made"="tower"]["tower:type"="communication"](${BBOX}););out center tags;`,
+    'towers',
+  );
+  const towers = [];
+  for (const element of data.elements) {
+    const lon = element.lon ?? element.center?.lon;
+    const lat = element.lat ?? element.center?.lat;
+    if (lon === undefined || lat === undefined) continue;
+    const tags = element.tags ?? {};
+    // Masts tagged for other uses (lighting, flood-light, observation) are not sites.
+    if (tags['tower:type'] && !/communication|mobile|telecom/i.test(tags['tower:type'])) continue;
+    const height = Number.parseFloat(tags['tower:height'] ?? tags.height ?? '');
+    towers.push({
+      source: 'osm',
+      name: tags.name ?? tags.operator ?? null,
+      operator: tags.operator ?? null,
+      lon,
+      lat,
+      mastMetres: Number.isFinite(height) ? height : null,
+    });
+  }
+  log('osm towers', towers.length);
+  return towers;
+}
+
+/**
+ * OpenCellID cells for the AOI, clustered into sites. Skipped without a key:
+ * get one free at https://opencellid.org (account → API keys) and export
+ * OPENCELLID_KEY before baking. The area endpoint caps a query at 4 km², so
+ * the AOI is walked in ~2 km tiles, each cached under .cache/opencellid/.
+ * Positions are crowd-sourced estimates (often a single sample), so cells
+ * within SITE_MERGE_METRES are one site.
+ */
+const OPENCELLID_TILE_DEG = 0.018; // ~2 km, under the 4 km² cap
+async function fetchOpenCellIdSites() {
+  const key = process.env.OPENCELLID_KEY;
+  if (!key) return [];
+  const dir = path.join(CACHE, 'opencellid');
+  await mkdir(dir, { recursive: true });
+  const cells = [];
+  let tiles = 0;
+  let fetched = 0;
+  for (let lat = AOI.south; lat < AOI.north; lat += OPENCELLID_TILE_DEG) {
+    for (let lon = AOI.west; lon < AOI.east; lon += OPENCELLID_TILE_DEG) {
+      tiles += 1;
+      const bbox = [lat, lon, Math.min(lat + OPENCELLID_TILE_DEG, AOI.north), Math.min(lon + OPENCELLID_TILE_DEG, AOI.east)]
+        .map((v) => v.toFixed(4))
+        .join(',');
+      const file = path.join(dir, `${bbox}.json`);
+      if (!(await exists(file))) {
+        const response = await fetch(
+          `https://opencellid.org/cell/getInArea?key=${key}&BBOX=${bbox}&format=json&limit=500`,
+        );
+        const text = await response.text();
+        let parsed = null;
+        try {
+          parsed = JSON.parse(text);
+        } catch {
+          parsed = null;
+        }
+        if (!response.ok || !parsed || parsed.error) {
+          log('OpenCellID', response.status, parsed?.error ?? text.slice(0, 80), '— stopping; seeds fill the rest');
+          break;
+        }
+        await writeFile(file, text);
+        fetched += 1;
+      }
+      const data = JSON.parse(await readFile(file, 'utf8'));
+      for (const cell of data.cells ?? []) {
+        cells.push({ lon: Number(cell.lon), lat: Number(cell.lat), radio: cell.radio, mnc: cell.mnc });
+      }
+    }
+  }
+  const clusters = [];
+  for (const cell of cells) {
+    const kx = metresPerDegLon(cell.lat);
+    const near = clusters.find(
+      (c) => Math.hypot((c.lon - cell.lon) * kx, (c.lat - cell.lat) * METRES_PER_DEG_LAT) < SITE_CELL_CLUSTER_METRES,
+    );
+    if (near) {
+      near.lon = (near.lon * near.n + cell.lon) / (near.n + 1);
+      near.lat = (near.lat * near.n + cell.lat) / (near.n + 1);
+      near.n += 1;
+      near.operators.add(cell.mnc);
+    } else {
+      clusters.push({ lon: cell.lon, lat: cell.lat, n: 1, operators: new Set([cell.mnc]) });
+    }
+  }
+  const credible = clusters
+    .filter((c) => c.n >= SITE_MIN_CELLS || c.operators.size >= SITE_MIN_OPERATORS)
+    .sort((a, b) => b.n - a.n);
+  // Greedy by strength with a spacing rule, so the marker set spreads along
+  // the valley instead of stacking up where the trunk road carries traffic.
+  const picked = [];
+  for (const c of credible) {
+    if (picked.length >= SITE_MAX_COUNT) break;
+    const kx = metresPerDegLon(c.lat);
+    if (picked.some((p) => Math.hypot((p.lon - c.lon) * kx, (p.lat - c.lat) * METRES_PER_DEG_LAT) < SITE_SPACING_METRES)) continue;
+    picked.push(c);
+  }
+  log('opencellid', tiles, 'tiles (' + fetched + ' fetched),', cells.length, 'cells →', clusters.length, 'clusters →', credible.length, 'credible →', picked.length, 'sites');
+  return picked.map((c) => ({
+    source: 'opencellid',
+    name: null,
+    operator: [...new Set([...c.operators].map((mnc) => OPERATORS[mnc] ?? `MNC ${mnc}`))].join(' / '),
+    lon: c.lon,
+    lat: c.lat,
+    mastMetres: null,
+    cells: c.n,
+  }));
+}
+
+/**
+ * Merges the tower sources, tops up with seeds where the map is empty, and
+ * attaches the fields the failure model needs: ground, HAND, access node,
+ * power, and a backhaul parent. Backhaul rule (an assumption, documented in
+ * the README): sites within SITE_FIBRE_METRES of the trunk road are fibre-fed
+ * and chain toward Kuala Krai along the road; every other site is a microwave
+ * link to the nearest site that can see it; the Kuala Krai town site is the hub.
+ */
+function buildSites(raw, grid, hand, places, graph, depot) {
+  const { elevation, width, height } = grid;
+  const metresBetween = (a, b) =>
+    Math.hypot((a.lon - b.lon) * metresPerDegLon((a.lat + b.lat) / 2), (a.lat - b.lat) * METRES_PER_DEG_LAT);
+  const cellOf = (lon, lat) => {
+    const col = Math.floor(((lon - AOI.west) / (AOI.east - AOI.west)) * width);
+    const row = Math.floor(((AOI.north - lat) / (AOI.north - AOI.south)) * height);
+    if (col < 0 || row < 0 || col >= width || row >= height) return -1;
+    return row * width + col;
+  };
+
+  // Dedupe: an OSM tower within a cell cluster's radius is that cluster's
+  // real position, so it wins the location and keeps the cluster's cells.
+  const merged = [];
+  for (const site of raw) {
+    if (cellOf(site.lon, site.lat) < 0) continue;
+    const radius = site.source === 'osm' || merged.some((o) => o.source === 'osm') ? SITE_CELL_CLUSTER_METRES : SITE_MERGE_METRES;
+    const twin = merged.find((other) => metresBetween(other, site) < radius);
+    if (twin) {
+      if (site.source === 'osm' && twin.source !== 'osm') {
+        Object.assign(twin, { lon: site.lon, lat: site.lat, source: 'osm', mastMetres: site.mastMetres ?? twin.mastMetres, name: site.name ?? twin.name });
+      } else if (twin.source === 'osm' && site.source === 'opencellid') {
+        twin.cells = (twin.cells ?? 0) + (site.cells ?? 0);
+        twin.operator = twin.operator ?? site.operator;
+      }
+      continue;
+    }
+    merged.push({ ...site });
+  }
+
+  // Snap each site to the highest dry cell within SITE_SNAP_METRES.
+  for (const site of merged) {
+    const kx = metresPerDegLon(site.lat);
+    const dlon = SITE_SNAP_METRES / kx;
+    const dlat = SITE_SNAP_METRES / METRES_PER_DEG_LAT;
+    let best = null;
+    for (let lat = site.lat - dlat; lat <= site.lat + dlat; lat += 0.0003) {
+      for (let lon = site.lon - dlon; lon <= site.lon + dlon; lon += 0.0003) {
+        const index = cellOf(lon, lat);
+        if (index < 0 || hand[index] < 30) continue;
+        if (Math.hypot((lon - site.lon) * kx, (lat - site.lat) * METRES_PER_DEG_LAT) > SITE_SNAP_METRES) continue;
+        if (!best || elevation[index] > best.elevation) best = { lon, lat, elevation: elevation[index] };
+      }
+    }
+    if (best) {
+      site.snappedM = Math.round(metresBetween(site, best));
+      site.lon = best.lon;
+      site.lat = best.lat;
+    }
+  }
+  if (merged.length < SITE_MIN_COUNT) {
+    for (const seed of SITE_SEEDS) {
+      if (merged.length >= Math.max(SITE_MIN_COUNT, 12)) break;
+      if (merged.some((other) => metresBetween(other, seed) < SITE_MERGE_METRES)) continue;
+      merged.push({ source: 'seed', name: seed.name, operator: null, lon: seed.lon, lat: seed.lat, mastMetres: null });
+    }
+  }
+
+  const town = places.find((p) => p.name === 'Kuala Krai' && p.place === 'town') ?? depot;
+  const nearestPlace = (site) => {
+    let best = null;
+    for (const place of places) {
+      const d = metresBetween(place, site);
+      if (!best || d < best.d) best = { d, place };
+    }
+    return best?.place.name ?? 'Site';
+  };
+  const nearestRoadNode = (site) => {
+    let best = null;
+    for (const index of graph.roadNodes) {
+      const [lon, lat] = graph.nodes[index];
+      const d = metresBetween({ lon, lat }, site);
+      if (!best || d < best.d) best = { d, index };
+    }
+    return best;
+  };
+  const trunkVertices = [];
+  for (const edge of graph.edges) {
+    if (edge.klass !== 'trunk' && edge.klass !== 'primary') continue;
+    for (const [lon, lat] of edge.points) trunkVertices.push({ lon, lat });
+  }
+  const trunkDistance = (site) => Math.min(...trunkVertices.map((v) => metresBetween(v, site)));
+
+  // Repeated place names get a compass suffix so every site reads uniquely.
+  const baseNames = merged.map((site) => site.name ?? nearestPlace(site));
+  const placeOf = (site) => places.find((p) => p.name === nearestPlace(site)) ?? site;
+  const compass = (site) => {
+    const p = placeOf(site);
+    const dx = (site.lon - p.lon) * metresPerDegLon(p.lat);
+    const dy = (site.lat - p.lat) * METRES_PER_DEG_LAT;
+    if (Math.hypot(dx, dy) < 400) return 'centre';
+    const angle = ((Math.atan2(dx, dy) * 180) / Math.PI + 360) % 360;
+    return ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'][Math.round(angle / 45) % 8];
+  };
+  const sites = merged.map((site, index) => {
+    const cell = cellOf(site.lon, site.lat);
+    const road = nearestRoadNode(site);
+    const toTown = metresBetween(site, town);
+    const repeated = baseNames.filter((n) => n === baseNames[index]).length > 1;
+    return {
+      id: `site-${index}`,
+      name: site.name && site.source === 'osm' ? site.name : repeated ? `${baseNames[index]} ${compass(site)}` : baseNames[index],
+      operator: site.operator,
+      lon: Number(site.lon.toFixed(5)),
+      lat: Number(site.lat.toFixed(5)),
+      elevation: elevation[cell],
+      handDm: hand[cell],
+      mastMetres: site.mastMetres ?? SITE_DEFAULT_MAST_METRES,
+      source: site.source,
+      cells: site.cells ?? 0,
+      snappedM: site.snappedM ?? 0,
+      power: { grid: true, batteryHours: SITE_BATTERY_HOURS, genset: toTown < SITE_TOWN_METRES },
+      accessNode: road.index,
+      accessRoadM: Math.round(road.d),
+      toTownM: Math.round(toTown),
+      trunkM: Math.round(trunkDistance(site)),
+      backhaul: { parent: null, kind: 'microwave' },
+    };
+  });
+  // A compass suffix can still collide (two sites south-east of one village);
+  // number those so every name stays unique.
+  const seen = new Map();
+  for (const site of sites) seen.set(site.name, (seen.get(site.name) ?? 0) + 1);
+  const counter = new Map();
+  for (const site of sites) {
+    if ((seen.get(site.name) ?? 0) < 2) continue;
+    const n = (counter.get(site.name) ?? 0) + 1;
+    counter.set(site.name, n);
+    site.name = `${site.name} ${n}`;
+  }
+  if (sites.length === 0) throw new Error('no network sites');
+
+  // Hub: the site nearest Kuala Krai town.
+  const hub = sites.reduce((a, b) => (b.toTownM < a.toTownM ? b : a));
+  hub.backhaul = { parent: null, kind: 'fibre' };
+
+  // Fibre sites chain toward the hub along the road: parent = the next fibre
+  // site that is closer to town (by road distance proxy: straight line).
+  const fibre = sites.filter((s) => s !== hub && s.trunkM <= SITE_FIBRE_METRES);
+  for (const site of fibre) {
+    const closer = [hub, ...fibre].filter((o) => o !== site && o.toTownM < site.toTownM);
+    const parent = closer.reduce((a, b) => (metresBetween(b, site) < metresBetween(a, site) ? b : a), hub);
+    site.backhaul = { parent: parent.id, kind: 'fibre' };
+  }
+
+  // Microwave sites: nearest site with line of sight from mast to mast.
+  const lineOfSight = (from, to) => {
+    const eye = elevation[cellOf(from.lon, from.lat)] + from.mastMetres;
+    const target = elevation[cellOf(to.lon, to.lat)] + to.mastMetres;
+    const distance = metresBetween(from, to);
+    const steps = Math.max(2, Math.ceil(distance / 30));
+    for (let s = 1; s < steps; s += 1) {
+      const t = s / steps;
+      const lon = from.lon + (to.lon - from.lon) * t;
+      const lat = from.lat + (to.lat - from.lat) * t;
+      const ground = elevation[cellOf(lon, lat)];
+      if (ground > eye + (target - eye) * t - 5) return false; // 5 m clearance
+    }
+    return true;
+  };
+  for (const site of sites) {
+    if (site.backhaul.kind === 'fibre') continue;
+    const others = sites
+      .filter((o) => o !== site && metresBetween(o, site) <= SITE_MICROWAVE_METRES)
+      .sort((a, b) => metresBetween(a, site) - metresBetween(b, site));
+    const seen = others.find((o) => lineOfSight(site, o));
+    const parent = seen ?? others[0] ?? hub;
+    site.backhaul = { parent: parent.id, kind: 'microwave', lineOfSight: Boolean(seen) };
+  }
+
+  const bySource = sites.reduce((m, s) => ({ ...m, [s.source]: (m[s.source] ?? 0) + 1 }), {});
+  log('sites', sites.length, JSON.stringify(bySource), '· hub', hub.name);
+  return sites;
+}
+
 // --- Main ------------------------------------------------------------------
 
 async function main() {
@@ -973,6 +1310,14 @@ async function main() {
   const places = await bakePlaces();
   const depot = pickDepot(places, graph);
   const candidates = pickCandidates(grid, hand, places, graph);
+  const sites = buildSites(
+    [...(await fetchOsmTowers()), ...(await fetchOpenCellIdSites())],
+    grid,
+    hand,
+    places,
+    graph,
+    depot,
+  );
   const towerSite = candidates[0];
   const houses = await bakeHouses(grid, hand, places);
   await writeFile(path.join(OUT, 'houses.bin'), Buffer.from(houses.data.buffer));
@@ -997,6 +1342,7 @@ async function main() {
     places,
     depot,
     candidates,
+    sites,
     towerSite,
     houses: {
       file: 'houses.bin',
@@ -1008,6 +1354,7 @@ async function main() {
       'Elevation: NASA SRTM 1 arc-second (AWS Open Data elevation-tiles-prod)',
       'Imagery: Sentinel-2 cloudless 2020 by EOX IT Services, CC BY 4.0 (ESA Copernicus)',
       'Roads, railway, settlements, residential areas and buildings: OpenStreetMap contributors, ODbL',
+      'Network sites: OpenStreetMap masts and communication towers, ODbL; OpenCellID when a key is present, CC BY-SA 4.0; hand-placed seeds where the map is empty',
     ],
   };
   await writeFile(path.join(OUT, 'terrain.json'), JSON.stringify(metadata));

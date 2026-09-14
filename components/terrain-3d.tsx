@@ -58,7 +58,7 @@ const HOME_COUNT_RADIUS_METRES = 1200;
 
 type Anchor = {
   id: string;
-  kind: 'tower' | 'population' | 'depot' | 'candidate';
+  kind: 'tower' | 'population' | 'depot' | 'candidate' | 'site';
   label: string;
   detail: string;
   lon: number;
@@ -162,6 +162,16 @@ function deriveAnchors(terrain: TerrainData): Anchor[] {
       lat: meta.depot.lat,
       liftMetres: 40,
     },
+    // Existing network sites: real where the map knows them, seeds elsewhere.
+    ...meta.sites.map((site) => ({
+      id: site.id,
+      kind: 'site' as const,
+      label: site.name,
+      detail: site.source === 'seed' ? 'placeholder site' : site.source,
+      lon: site.lon,
+      lat: site.lat,
+      liftMetres: site.mastMetres + 10,
+    })),
     // Every candidate has an anchor so its marker can appear the moment the
     // site evaluation reaches it; the React side only mounts spawned ones.
     ...meta.candidates.map((candidate, index) => ({
@@ -2025,11 +2035,13 @@ export function Terrain3D({
           const visible =
             anchor.kind === 'tower'
               ? layers.towers
-              : anchor.kind === 'depot'
-                ? true
-                : anchor.kind === 'candidate'
-                  ? site !== undefined && spawnedIds.includes(anchor.id)
-                  : layers.population;
+              : anchor.kind === 'site'
+                ? layers.sites
+                : anchor.kind === 'depot'
+                  ? true
+                  : anchor.kind === 'candidate'
+                    ? site !== undefined && spawnedIds.includes(anchor.id)
+                    : layers.population;
           if (!visible) return null;
           // In the overview a settlement shows the rain falling on it right
           // now, sampled from the forecast grid at the selected hour.
@@ -2103,6 +2115,25 @@ export function Terrain3D({
                     </span>
                   </div>
                   <span className="size-2.5 rounded-full border-2 border-white bg-emerald-400 shadow-[0_0_0_4px_rgb(52_211_153/25%)]" />
+                </div>
+              ) : anchor.kind === 'site' ? (
+                <div
+                  className="flex -translate-x-1/2 -translate-y-full flex-col items-center"
+                  title={anchor.detail}
+                >
+                  <span className="mb-1 whitespace-nowrap rounded-md border border-slate-500/40 bg-[#07131d]/85 px-1.5 py-0.5 text-[10px] font-semibold text-slate-200 backdrop-blur-sm">
+                    {anchor.label}
+                    {anchor.detail === 'placeholder site' && (
+                      <span className="ml-1 font-normal text-slate-500">seed</span>
+                    )}
+                  </span>
+                  <span className="relative grid size-6 place-items-center rounded-full border border-slate-400/50 bg-slate-900/85 text-slate-200">
+                    <RadioTower className="size-3.5" aria-hidden />
+                    <span
+                      className="absolute -right-0.5 -top-0.5 size-2.5 rounded-full border border-slate-950 bg-emerald-400"
+                      aria-label="status: up"
+                    />
+                  </span>
                 </div>
               ) : anchor.kind === 'depot' ? (
                 <div className="flex -translate-x-1/2 -translate-y-full flex-col items-center">

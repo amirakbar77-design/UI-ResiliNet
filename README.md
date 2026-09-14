@@ -50,6 +50,12 @@ The bake builds a junction-preserving graph from OSM node ids (`public/terrain/r
 
 `lib/routing.ts` holds the one rule the map, the router and the check script share: a road is cut at a level when at least 150 m of it is continuously under water. Before that test, samples inside a channel and `bridge=yes` ways get a 5 m deck clearance (bridges and culverts), and classified roads get an embankment allowance (trunk/primary +1.5 m, secondary +1.0 m, tertiary +0.5 m) because a 30 m DEM sees the canopy rather than the road surface. All of these are illustrative; a real study would take road-surface heights from LiDAR. `node scripts/check-routes.mjs [levels…]` prints reachability per candidate.
 
+## Existing network sites
+
+The bake writes `sites` to `terrain.json` from two sources. OpenStreetMap knows exactly one communication tower in the AOI. OpenCellID knows ~1,100 cells, but each is a single crowd-sourced sample of where a phone *heard* the cell — often on the road or in the river — so one macro site appears as a cloud of points. The bake clusters cells within 1.2 km, keeps a cluster only when at least 3 cells or 2 operators corroborate it, picks the strongest clusters at least 2.5 km apart (up to 12), merges the OSM tower with its cloud, and **snaps every site to the highest dry ground (HAND ≥ 3 m) within 500 m** — the assumption being that a real site stands on the nearest rise, not in the channel the samples landed in. Operators come from the MNC codes. If fewer than eight sites result the bake tops up from a `SITE_SEEDS` table (one per major settlement on high ground beside a road: Kuala Krai town and bypass, Manek Urai, Kuala Gris, Dabong, Kemubu, Kuala Balah, Jelawang), each flagged `source: 'seed'` and labelled *seed* on the map. **Seeds are placeholders, not real infrastructure.**
+
+Each site carries what the failure model needs, all of it assumptions until an operator supplies real figures: a 45 m mast unless OSM tags a height; grid power with a **6 h battery**, plus a **genset** for sites within 2.5 km of Kuala Krai town; the road-graph node it is reached from; and a backhaul parent by a simple rule — sites within 1 km of the trunk or primary road are **fibre** and chain toward the Kuala Krai hub (the site nearest the town), every other site is a **microwave** link to the nearest site that can see its mast (a straight ray over the DEM with 5 m clearance; the nearest site regardless if none can). Real backhaul topology is operator-confidential; this rule is the stand-in.
+
 ## Site evaluation
 
 `lib/sites.ts`: a candidate is assessed if the route wave reached its road node at today's level. Its score is the number of homes that are under water at the planned hour *and* inside its viewshed — the homes it would reconnect. The winner has the highest count; a tie goes to the shorter road. The card reports the winner's height above the planned flood, road distance from the depot, and the count; the browser console logs the full table.
@@ -73,6 +79,7 @@ The script downloads its inputs once into `.cache/` (gitignored) and writes `ele
 - Elevation: NASA SRTM 1 arc-second, via the AWS Open Data `elevation-tiles-prod` bucket.
 - Imagery: Sentinel-2 cloudless 2020 by EOX IT Services GmbH, CC BY 4.0, based on modified Copernicus Sentinel data 2020.
 - Roads, railway, settlements, residential areas and buildings: © OpenStreetMap contributors, ODbL.
+- Network sites: OpenStreetMap `man_made=mast` / `communications_tower` / `tower` + `tower:type=communication` (ODbL); OpenCellID cells clustered within 300 m when `OPENCELLID_KEY` is set at bake time (CC BY-SA 4.0 — get a free key at opencellid.org → account → API keys); hand-placed seeds where the map is empty.
 
 ## Checks
 
