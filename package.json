@@ -8,7 +8,7 @@
   "scripts": {
     "dev": "vinext dev",
     "build": "vinext build",
-    "bake:terrain": "node scripts/bake-terrain.mjs",
+    "bake:terrain": "node --env-file-if-exists=.env scripts/bake-terrain.mjs",
     "start": "wrangler dev --config dist/server/wrangler.json",
     "lint": "oxlint",
     "format": "oxfmt"

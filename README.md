@@ -79,7 +79,7 @@ The script downloads its inputs once into `.cache/` (gitignored) and writes `ele
 - Elevation: NASA SRTM 1 arc-second, via the AWS Open Data `elevation-tiles-prod` bucket.
 - Imagery: Sentinel-2 cloudless 2020 by EOX IT Services GmbH, CC BY 4.0, based on modified Copernicus Sentinel data 2020.
 - Roads, railway, settlements, residential areas and buildings: © OpenStreetMap contributors, ODbL.
-- Network sites: OpenStreetMap `man_made=mast` / `communications_tower` / `tower` + `tower:type=communication` (ODbL); OpenCellID cells clustered within 300 m when `OPENCELLID_KEY` is set at bake time (CC BY-SA 4.0 — get a free key at opencellid.org → account → API keys); hand-placed seeds where the map is empty.
+- Network sites: OpenStreetMap `man_made=mast` / `communications_tower` / `tower` + `tower:type=communication` (ODbL); OpenCellID cells when `OPENCELLID_KEY` is set in `.env` at bake time (see `.env.example`) (CC BY-SA 4.0 — get a free key at opencellid.org → account → API keys); hand-placed seeds where the map is empty.
 
 ## Checks
 
