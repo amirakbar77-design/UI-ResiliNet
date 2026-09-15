@@ -16,6 +16,7 @@
  */
 
 import type { FloodCurve } from './forecast.ts';
+import { populatedCells } from './population.ts';
 import { edgeCutAt } from './routing.ts';
 import type { Site, TerrainData } from './terrain-field.ts';
 import { viewshedMask, type ViewshedMask } from './viewshed.ts';
@@ -260,16 +261,17 @@ export function coverageAt(masks: Map<string, ViewshedMask>, liveIds: string[]) 
 }
 
 export type CoverageHole = {
-  /** 1 for each home that has signal now and none at the hour. */
+  /** 1 for each populated cell (lib/population.ts order) with signal now and none at the hour. */
   mask: Uint8Array;
+  /** People in the hole. */
   count: number;
-  /** Homes with signal now, for context. */
+  /** People with signal now, for context. */
   coveredNow: number;
 };
 
 /**
- * The hole at `hour`: homes covered by a live site right now that no site
- * still live at `hour` covers. Flooding alone does not put a home here — a
+ * The hole at `hour`: people covered by a live site right now that no site
+ * still live at `hour` covers. Flooding alone does not put anyone here — a
  * flooded home under a working site still has signal.
  */
 export function coverageHole(
@@ -278,21 +280,20 @@ export function coverageHole(
   network: NetworkAssessment,
   hour: number,
 ): CoverageHole {
-  const { houses } = terrain;
-  const count = houses.length / 3;
+  const cells = populatedCells(terrain);
   const now = coverageAt(masks, network.liveAt(0));
   const later = coverageAt(masks, network.liveAt(hour));
-  const mask = new Uint8Array(count);
-  let holes = 0;
+  const mask = new Uint8Array(cells.count);
+  let people = 0;
   let coveredNow = 0;
-  for (let i = 0; i < count; i += 1) {
-    const lon = houses[i * 3]!;
-    const lat = houses[i * 3 + 1]!;
+  for (let i = 0; i < cells.count; i += 1) {
+    const lon = cells.lon[i]!;
+    const lat = cells.lat[i]!;
     if (!now.covers(lon, lat)) continue;
-    coveredNow += 1;
+    coveredNow += cells.people[i]!;
     if (later.covers(lon, lat)) continue;
     mask[i] = 1;
-    holes += 1;
+    people += cells.people[i]!;
   }
-  return { mask, count: holes, coveredNow };
+  return { mask, count: Math.round(people), coveredNow: Math.round(coveredNow) };
 }

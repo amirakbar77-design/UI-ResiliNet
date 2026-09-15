@@ -1,10 +1,11 @@
 /**
  * Site evaluation for the portable tower: which candidates the truck can
- * reach now, and how many homes without signal each would reconnect at the
- * planned hour. "Without signal" comes from lib/network.ts: homes covered by
+ * reach now, and how many people without signal each would reconnect at the
+ * planned hour. "Without signal" comes from lib/network.ts: people covered by
  * a live site now that no live site covers at the planned hour.
  */
 
+import { populatedCells } from './population.ts';
 import type { Candidate, Site, TerrainData } from './terrain-field.ts';
 import { elevationAtLonLat, viewshedMask, type ViewshedMask } from './viewshed.ts';
 
@@ -23,10 +24,10 @@ export type SiteAssessment = {
   candidate: Candidate;
   /** Route kilometres from the depot to the candidate's road node, now. */
   routeKm: number;
-  /** Homes without signal at the planned hour that the mast would see. */
-  homesReconnected: number;
-  /** All homes the mast would see, flooded or not. */
-  homesCovered: number;
+  /** People without signal at the planned hour that the mast would see. */
+  peopleReconnected: number;
+  /** Everyone the mast would see. */
+  peopleCovered: number;
   mask: ViewshedMask;
   /** Every existing site in microwave view, nearest first; the plan picks one that is live. */
   backhaulOptions: BackhaulOption[];
@@ -37,8 +38,9 @@ export type SiteAssessment = {
 
 /**
  * Assesses every candidate the route wave reaches, in order of route
- * distance, counting the homes in the coverage hole (`hole[i] === 1`) that
- * fall inside the mast's line-of-sight viewshed. Deterministic.
+ * distance, counting the people in the coverage hole (`hole[i] === 1` per
+ * populated cell) that fall inside the mast's line-of-sight viewshed.
+ * Deterministic.
  */
 export function assessSites(
   terrain: TerrainData,
@@ -49,8 +51,7 @@ export function assessSites(
   mastMetres = 32,
   radiusMetres = 9000,
 ): SiteAssessment[] {
-  const { houses } = terrain;
-  const count = houses.length / 3;
+  const cells = populatedCells(terrain);
   const metresBetween = (a: { lon: number; lat: number }, b: { lon: number; lat: number }) =>
     Math.hypot(
       (a.lon - b.lon) * 111_320 * Math.cos(((a.lat + b.lat) / 2) * (Math.PI / 180)),
@@ -94,20 +95,20 @@ export function assessSites(
     const backhaulOptions = backhaulFor(candidate);
     if (backhaulOptions.length === 0) return;
     const mask = viewshedMask(terrain, candidate, mastMetres, radiusMetres);
-    let homesReconnected = 0;
-    let homesCovered = 0;
-    for (let i = 0; i < count; i += 1) {
-      if (!mask.covers(houses[i * 3]!, houses[i * 3 + 1]!)) continue;
-      homesCovered += 1;
-      if (hole[i]) homesReconnected += 1;
+    let peopleReconnected = 0;
+    let peopleCovered = 0;
+    for (let i = 0; i < cells.count; i += 1) {
+      if (!mask.covers(cells.lon[i]!, cells.lat[i]!)) continue;
+      peopleCovered += cells.people[i]!;
+      if (hole[i]) peopleReconnected += cells.people[i]!;
     }
     results.push({
       id: `candidate-${index}`,
       index,
       candidate,
       routeKm,
-      homesReconnected,
-      homesCovered,
+      peopleReconnected: Math.round(peopleReconnected),
+      peopleCovered: Math.round(peopleCovered),
       mask,
       backhaulOptions,
       backhaulTo: backhaulOptions[0]!.siteId,

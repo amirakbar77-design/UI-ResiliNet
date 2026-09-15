@@ -8,6 +8,7 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { type Forecast, rainAt } from '@/lib/forecast';
 import { cutMask, type RouteEvaluation } from '@/lib/routing';
 import { type FailureCause, SITE_COVERAGE_RADIUS_METRES, type SiteStatus } from '@/lib/network';
+import { peopleNear } from '@/lib/population';
 import type { SiteAssessment } from '@/lib/sites';
 import { viewshedMask, type ViewshedMask } from '@/lib/viewshed';
 
@@ -18,8 +19,6 @@ import {
   type LayerKey,
   lonLatToWorld,
   mercatorUv,
-  metresPerDegreeLon,
-  type Place,
   SCENE_SCALE,
   sceneGrid,
   type TerrainData,
@@ -116,20 +115,9 @@ type SceneHandle = {
  * 1.5 km, so the markers sit where the HAND raster says the risk is.
  */
 function deriveAnchors(terrain: TerrainData): Anchor[] {
-  const { meta, hand, houses, width, height } = terrain;
+  const { meta, hand, width, height } = terrain;
   const g = sceneGrid(meta);
   const radiusCells = Math.round(1500 / (g.lonStep * 111_320));
-  const homesNear = (place: Place) => {
-    const kx = metresPerDegreeLon(place.lat);
-    let count = 0;
-    for (let i = 0; i < houses.length; i += 3) {
-      const dx = (houses[i]! - place.lon) * kx;
-      const dy = (houses[i + 1]! - place.lat) * 110_574;
-      if (dx * dx + dy * dy < HOME_COUNT_RADIUS_METRES ** 2) count += 1;
-    }
-    return count;
-  };
-
   const scored = meta.places.map((place) => {
     const col = Math.round((place.lon - meta.aoi.west) / g.lonStep);
     const row = Math.round((meta.aoi.north - place.lat) / g.latStep);
@@ -207,7 +195,7 @@ function deriveAnchors(terrain: TerrainData): Anchor[] {
       id: `place-${entry.place.name}-${index}`,
       kind: 'population',
       label: entry.place.name,
-      detail: `${homesNear(entry.place)} homes`,
+      detail: `~${Math.round(peopleNear(terrain, entry.place.lon, entry.place.lat, HOME_COUNT_RADIUS_METRES)).toLocaleString()} people`,
       lon: entry.place.lon,
       lat: entry.place.lat,
       liftMetres: 60,
@@ -2237,7 +2225,7 @@ export function Terrain3D({
                       {anchor.label}
                     </div>
                     <div className="mt-0.5 pl-6 text-xs text-emerald-100/85 tabular-nums">
-                      reconnects {site?.homesReconnected ?? 0} homes without signal
+                      reconnects {(site?.peopleReconnected ?? 0).toLocaleString()} people without signal
                     </div>
                   </div>
                   <div className="grid size-9 place-items-center rounded-full border-2 border-white bg-emerald-400 text-emerald-950 shadow-[0_0_0_7px_rgb(52_211_153/22%)]">
@@ -2250,7 +2238,7 @@ export function Terrain3D({
                   type="button"
                   onClick={() => onPreview(anchor.id)}
                   aria-pressed={previewId === anchor.id}
-                  title={`${anchor.label}: reconnects ${site?.homesReconnected ?? 0} homes without signal`}
+                  title={`${anchor.label}: reconnects ${(site?.peopleReconnected ?? 0).toLocaleString()} people without signal`}
                   className={`pointer-events-auto flex min-h-7 -translate-x-1/2 -translate-y-1/2 items-center gap-1.5 whitespace-nowrap rounded-full border px-2 text-[11px] font-semibold tabular-nums backdrop-blur-sm transition-colors ${
                     previewId === anchor.id
                       ? 'border-sky-300/60 bg-sky-500/30 text-white'
@@ -2258,14 +2246,14 @@ export function Terrain3D({
                   }`}
                 >
                   <span className="size-1.5 rounded-full bg-current opacity-70" />
-                  {site?.homesReconnected ?? 0}
+                  {(site?.peopleReconnected ?? 0).toLocaleString()}
                 </button>
               ) : anchor.kind === 'candidate' ? (
                 <div className="flex -translate-x-1/2 -translate-y-full flex-col items-center">
                   <div className="mb-1 whitespace-nowrap rounded-md border border-emerald-300/30 bg-[#07131d]/85 px-2 py-1 text-[11px] leading-4 backdrop-blur-sm">
                     <span className="font-semibold text-white">{anchor.label}</span>
                     <span className="block text-emerald-200/90 tabular-nums">
-                      reconnects {site?.homesReconnected ?? 0} homes without signal
+                      reconnects {(site?.peopleReconnected ?? 0).toLocaleString()} people without signal
                     </span>
                   </div>
                   <span className="size-2.5 rounded-full border-2 border-white bg-emerald-400 shadow-[0_0_0_4px_rgb(52_211_153/25%)]" />

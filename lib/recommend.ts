@@ -3,11 +3,12 @@
  * deploy the portable tower, or both — the tower linked by microwave to a
  * site that is live in that plan. Whichever keeps the most homes on signal
  * at the planned hour wins. A system that can say "refuel, don't deploy" is
- * the one an operator believes.
+ * the one an operator believes. Every count is people (WorldPop).
  */
 
 import type { CoverageHole, NetworkAssessment, NetworkSiteState } from './network.ts';
 import { coverageAt } from './network.ts';
+import { populatedCells } from './population.ts';
 import { routeFrom } from './routing.ts';
 import type { SiteAssessment } from './sites.ts';
 import type { TerrainData } from './terrain-field.ts';
@@ -28,8 +29,8 @@ export type KeepAliveOption = {
   /** Road km and drive time for a generator run; null for a local refuel. */
   routeKm: number | null;
   travelHours: number | null;
-  /** Homes in the hole that this site alone would keep on signal. */
-  homesKept: number;
+  /** People in the hole that this site alone would keep on signal. */
+  peopleKept: number;
 };
 
 export type PortableStep = {
@@ -38,15 +39,15 @@ export type PortableStep = {
   /** The live site the mast links to in this plan. */
   backhaulTo: string;
   backhaulKm: number;
-  /** Homes without signal in this plan that the mast would reconnect. */
-  homesReconnected: number;
+  /** People without signal in this plan that the mast would reconnect. */
+  peopleReconnected: number;
 };
 
 export type Plan = {
   keep: KeepAliveOption | null;
   portable: PortableStep | null;
-  /** Homes kept or brought back on signal at the planned hour. */
-  homesOnSignal: number;
+  /** People kept or brought back on signal at the planned hour. */
+  peopleOnSignal: number;
 };
 
 export type Recommendation = {
@@ -76,8 +77,8 @@ export function keepAliveOptions(
   plannedHour: number,
   routing: RoutingContext,
 ): KeepAliveOption[] {
-  const { houses, graph, meta } = terrain;
-  const count = houses.length / 3;
+  const { graph, meta } = terrain;
+  const cells = populatedCells(terrain);
   const survivors = coverageAt(masks, network.liveAt(plannedHour));
   // A convoy must drive on roads that are still open when it passes, so it is
   // routed over the roads open at its arrival hour rather than the shortest
@@ -96,26 +97,26 @@ export function keepAliveOptions(
     }
     return null;
   };
-  const homesKeptBy = (id: string) => {
+  const peopleKeptBy = (id: string) => {
     const mask = masks.get(id);
     if (!mask) return 0;
     let kept = 0;
-    for (let i = 0; i < count; i += 1) {
+    for (let i = 0; i < cells.count; i += 1) {
       if (!hole.mask[i]) continue;
-      const lon = houses[i * 3]!;
-      const lat = houses[i * 3 + 1]!;
-      if (mask.covers(lon, lat) && !survivors.covers(lon, lat)) kept += 1;
+      const lon = cells.lon[i]!;
+      const lat = cells.lat[i]!;
+      if (mask.covers(lon, lat) && !survivors.covers(lon, lat)) kept += cells.people[i]!;
     }
-    return kept;
+    return Math.round(kept);
   };
 
   const options: KeepAliveOption[] = [];
   for (const state of network.sites) {
     if (state.failureCause !== 'power' || state.failureHour === null) continue;
     if (state.failureHour > plannedHour) continue;
-    const homesKept = homesKeptBy(state.id);
+    const peopleKept = peopleKeptBy(state.id);
     if (state.accessCutHour !== null && state.accessCutHour > 0) {
-      options.push({ kind: 'keep-alive', site: state, method: 'local-refuel', by: state.accessCutHour, routeKm: null, travelHours: null, homesKept });
+      options.push({ kind: 'keep-alive', site: state, method: 'local-refuel', by: state.accessCutHour, routeKm: null, travelHours: null, peopleKept });
       continue;
     }
     const window = convoyWindow(state.site.accessNode);
@@ -128,10 +129,10 @@ export function keepAliveOptions(
       by: window.by,
       routeKm: Number(window.km.toFixed(1)),
       travelHours: Number((window.km / CONVOY_KMH).toFixed(1)),
-      homesKept,
+      peopleKept,
     });
   }
-  options.sort((a, b) => b.homesKept - a.homesKept || a.by - b.by);
+  options.sort((a, b) => b.peopleKept - a.peopleKept || a.by - b.by);
   return options;
 }
 
@@ -149,38 +150,37 @@ export function recommendPlans(
   sites: SiteAssessment[],
   keepAlive: KeepAliveOption[],
 ): Recommendation {
-  const { houses } = terrain;
-  const count = houses.length / 3;
+  const cells = populatedCells(terrain);
   const survivorIds = new Set(network.liveAt(plannedHour));
 
   const holeMaskGiven = (extraLive: string | null) => {
     if (!extraLive) return hole.mask;
     const extra = coverageAt(masks, [extraLive]);
     const mask = new Uint8Array(hole.mask);
-    for (let i = 0; i < count; i += 1) {
-      if (mask[i] && extra.covers(houses[i * 3]!, houses[i * 3 + 1]!)) mask[i] = 0;
+    for (let i = 0; i < cells.count; i += 1) {
+      if (mask[i] && extra.covers(cells.lon[i]!, cells.lat[i]!)) mask[i] = 0;
     }
     return mask;
   };
   const reconnectedIn = (site: SiteAssessment, mask: Uint8Array) => {
     let n = 0;
-    for (let i = 0; i < count; i += 1) {
-      if (mask[i] && site.mask.covers(houses[i * 3]!, houses[i * 3 + 1]!)) n += 1;
+    for (let i = 0; i < cells.count; i += 1) {
+      if (mask[i] && site.mask.covers(cells.lon[i]!, cells.lat[i]!)) n += cells.people[i]!;
     }
-    return n;
+    return Math.round(n);
   };
   const bestTower = (liveIds: Set<string>, mask: Uint8Array): PortableStep | null => {
     let best: PortableStep | null = null;
     for (const site of sites) {
       const link = site.backhaulOptions.find((o) => liveIds.has(o.siteId));
       if (!link) continue;
-      const homesReconnected = reconnectedIn(site, mask);
+      const peopleReconnected = reconnectedIn(site, mask);
       if (
         !best ||
-        homesReconnected > best.homesReconnected ||
-        (homesReconnected === best.homesReconnected && site.routeKm < best.site.routeKm)
+        peopleReconnected > best.peopleReconnected ||
+        (peopleReconnected === best.peopleReconnected && site.routeKm < best.site.routeKm)
       ) {
-        best = { kind: 'portable', site, backhaulTo: link.siteId, backhaulKm: link.km, homesReconnected };
+        best = { kind: 'portable', site, backhaulTo: link.siteId, backhaulKm: link.km, peopleReconnected };
       }
     }
     return best;
@@ -188,21 +188,21 @@ export function recommendPlans(
 
   const plans: Plan[] = [];
   const towerOnly = bestTower(survivorIds, hole.mask);
-  if (towerOnly) plans.push({ keep: null, portable: towerOnly, homesOnSignal: towerOnly.homesReconnected });
+  if (towerOnly) plans.push({ keep: null, portable: towerOnly, peopleOnSignal: towerOnly.peopleReconnected });
   for (const keep of keepAlive.slice(0, PLAN_KEEP_CANDIDATES)) {
-    plans.push({ keep, portable: null, homesOnSignal: keep.homesKept });
+    plans.push({ keep, portable: null, peopleOnSignal: keep.peopleKept });
     const liveIds = new Set(survivorIds);
     liveIds.add(keep.site.id);
     const mask = holeMaskGiven(keep.site.id);
     const tower = bestTower(liveIds, mask);
-    if (tower && tower.homesReconnected > 0) {
-      plans.push({ keep, portable: tower, homesOnSignal: keep.homesKept + tower.homesReconnected });
+    if (tower && tower.peopleReconnected > 0) {
+      plans.push({ keep, portable: tower, peopleOnSignal: keep.peopleKept + tower.peopleReconnected });
     }
   }
   const steps = (p: Plan) => (p.keep ? 1 : 0) + (p.portable ? 1 : 0);
   plans.sort(
     (a, b) =>
-      b.homesOnSignal - a.homesOnSignal ||
+      b.peopleOnSignal - a.peopleOnSignal ||
       steps(a) - steps(b) ||
       (a.portable?.site.routeKm ?? 0) - (b.portable?.site.routeKm ?? 0),
   );

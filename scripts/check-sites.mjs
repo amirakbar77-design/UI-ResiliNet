@@ -28,6 +28,7 @@ const terrain = {
   elevation: new Int16Array(await bin('elevation.bin')),
   hand: new Uint8Array(await bin('hand.bin')),
   houses: new Float32Array(await bin(meta.houses.file)),
+  population: new Float32Array(await bin(meta.population.file)),
   width: meta.grid.width,
   height: meta.grid.height,
 };
@@ -45,19 +46,19 @@ const allSites = assessSites(terrain, evaluation.distanceByNode, hole.mask, meta
 const sites = allSites.filter((s) => s.backhaulOptions.some((o) => usable.has(o.siteId)));
 const rec = recommendPlans(terrain, network, masks, hole, plannedHour, sites, keep);
 
-console.log(`gauge ${gauge.toFixed(1)} m · planned +${plannedHour} h · ${network.darkAt(plannedHour)} of ${network.summary.total} sites dark · hole ${hole.count} of ${hole.coveredNow} homes · survivors: ${[...survivors].map((id) => byId.get(id)?.name).join(', ') || 'none'}`);
+console.log(`gauge ${gauge.toFixed(1)} m · planned +${plannedHour} h · ${network.darkAt(plannedHour)} of ${network.summary.total} sites dark · hole ${hole.count} of ${hole.coveredNow} people · survivors: ${[...survivors].map((id) => byId.get(id)?.name).join(', ') || 'none'}`);
 console.log('\nKEEP-ALIVE');
-console.log('site                     method          by      route   drive   homes kept');
-for (const o of keep) console.log(`${o.site.site.name.padEnd(24)} ${o.method.padEnd(15)} +${String(o.by).padStart(2)} h  ${(o.routeKm === null ? '—' : o.routeKm + ' km').padStart(7)}  ${(o.travelHours === null ? '—' : o.travelHours + ' h').padStart(6)}  ${String(o.homesKept).padStart(6)}`);
+console.log('site                     method          by      route   drive  people kept');
+for (const o of keep) console.log(`${o.site.site.name.padEnd(24)} ${o.method.padEnd(15)} +${String(o.by).padStart(2)} h  ${(o.routeKm === null ? '—' : o.routeKm + ' km').padStart(7)}  ${(o.travelHours === null ? '—' : o.travelHours + ' h').padStart(6)}  ${String(o.peopleKept).padStart(6)}`);
 if (keep.length === 0) console.log('(none)');
 console.log(`\nPORTABLE CANDIDATES with a microwave path to a survivor or a keepable site (${sites.length} of ${allSites.length} reachable)`);
 console.log('candidate                route km   in hole   links (nearest first)');
-for (const s of sites) console.log(`${s.candidate.name.padEnd(24)} ${s.routeKm.toFixed(1).padStart(7)}   ${String(s.homesReconnected).padStart(7)}   ${s.backhaulOptions.filter((o) => usable.has(o.siteId)).slice(0, 3).map((o) => `${byId.get(o.siteId)?.name} ${o.km} km${survivors.has(o.siteId) ? ' (live)' : ''}`).join(' · ')}`);
+for (const s of sites) console.log(`${s.candidate.name.padEnd(24)} ${s.routeKm.toFixed(1).padStart(7)}   ${String(s.peopleReconnected).padStart(7)}   ${s.backhaulOptions.filter((o) => usable.has(o.siteId)).slice(0, 3).map((o) => `${byId.get(o.siteId)?.name} ${o.km} km${survivors.has(o.siteId) ? ' (live)' : ''}`).join(' · ')}`);
 const describe = (p) => {
   const parts = [];
-  if (p.keep) parts.push(`${p.keep.method === 'generator-run' ? 'generator run to' : 'local refuel of'} ${p.keep.site.site.name} by +${p.keep.by} h (keeps ${p.keep.homesKept})`);
-  if (p.portable) parts.push(`tower at ${p.portable.site.candidate.name} → ${byId.get(p.portable.backhaulTo)?.name} ${p.portable.backhaulKm} km (reconnects ${p.portable.homesReconnected})`);
-  return `${String(p.homesOnSignal).padStart(5)} on signal · ${parts.join(' + ')}`;
+  if (p.keep) parts.push(`${p.keep.method === 'generator-run' ? 'generator run to' : 'local refuel of'} ${p.keep.site.site.name} by +${p.keep.by} h (keeps ${p.keep.peopleKept})`);
+  if (p.portable) parts.push(`tower at ${p.portable.site.candidate.name} → ${byId.get(p.portable.backhaulTo)?.name} ${p.portable.backhaulKm} km (reconnects ${p.portable.peopleReconnected})`);
+  return `${String(p.peopleOnSignal).padStart(5)} on signal · ${parts.join(' + ')}`;
 };
 console.log('\nPLANS');
 if (rec.best) console.log('BEST        ', describe(rec.best)); else console.log('BEST         nothing viable');

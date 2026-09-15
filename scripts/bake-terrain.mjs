@@ -16,6 +16,7 @@
  *   hand.bin       Uint8 decimetres of Height Above Nearest Drainage, 255 = dry
  *   surface.jpg    Sentinel-2 mosaic reprojected to the AOI's mercator box
  *   houses.bin     Float32 little-endian [lon, lat, heading] per home
+ *   population.bin Float32 little-endian people per render cell (WorldPop)
  *   roads.json     junction-preserving road + rail graph: nodes and edges
  *                  with drawn geometry, length and minimum HAND
  *   terrain.json   grid metadata, attribution, settlements, depot, tower
@@ -34,6 +35,7 @@ import { createGunzip } from 'node:zlib';
 import { pipeline } from 'node:stream/promises';
 import { Readable } from 'node:stream';
 import path from 'node:path';
+import { fromFile as geotiffFromFile } from 'geotiff';
 import sharp from 'sharp';
 
 // Area of interest: the Sungai Galas valley in Kelantan, from Gunung Stong and
@@ -958,6 +960,60 @@ function pickCandidates({ elevation, width, height }, hand, places, graph) {
   return chosen.map(({ row: _row, col: _col, ...candidate }) => candidate);
 }
 
+// --- Population ---------------------------------------------------------------
+
+// WorldPop 2020, UN-adjusted, constrained to built-up areas, ~100 m. CC BY 4.0.
+// https://hub.worldpop.org/geodata/summary?id=49771
+const WORLDPOP_URL =
+  'https://data.worldpop.org/GIS/Population/Global_2000_2020_Constrained/2020/BSGM/MYS/mys_ppp_2020_UNadj_constrained.tif';
+
+/**
+ * Crops the WorldPop raster to the AOI and sums each ~100 m pixel into the
+ * render cell that contains its centre, so the total is preserved and every
+ * count in the app is people, not illustrative houses.
+ */
+async function bakePopulation(width, height) {
+  const file = path.join(CACHE, 'worldpop_mys_2020_unadj_constrained.tif');
+  if (!(await exists(file))) log('downloading WorldPop', WORLDPOP_URL);
+  await download(WORLDPOP_URL, file);
+  const tiff = await geotiffFromFile(file);
+  const image = await tiff.getImage();
+  const [originX, originY] = image.getOrigin();
+  const [resX, resY] = image.getResolution(); // resY is negative (north up)
+  const nodata = Number(image.getGDALNoData() ?? -99999);
+  const x0 = Math.max(0, Math.floor((AOI.west - originX) / resX));
+  const x1 = Math.min(image.getWidth(), Math.ceil((AOI.east - originX) / resX));
+  const y0 = Math.max(0, Math.floor((AOI.north - originY) / resY));
+  const y1 = Math.min(image.getHeight(), Math.ceil((AOI.south - originY) / resY));
+  const [raster] = await image.readRasters({ window: [x0, y0, x1, y1] });
+  const windowWidth = x1 - x0;
+  const population = new Float32Array(width * height);
+  let total = 0;
+  let max = 0;
+  let pixels = 0;
+  for (let j = 0; j < y1 - y0; j += 1) {
+    for (let i = 0; i < windowWidth; i += 1) {
+      const value = raster[j * windowWidth + i];
+      if (!(value > 0) || value === nodata) continue;
+      const lon = originX + (x0 + i + 0.5) * resX;
+      const lat = originY + (y0 + j + 0.5) * resY;
+      const col = Math.floor(((lon - AOI.west) / (AOI.east - AOI.west)) * width);
+      const row = Math.floor(((AOI.north - lat) / (AOI.north - AOI.south)) * height);
+      if (col < 0 || row < 0 || col >= width || row >= height) continue;
+      const index = row * width + col;
+      population[index] += value;
+      total += value;
+      pixels += 1;
+      if (population[index] > max) max = population[index];
+    }
+  }
+  let cells = 0;
+  for (const value of population) if (value > 0) cells += 1;
+  log('population', Math.round(total), 'people from', pixels, 'WorldPop pixels →', cells, 'populated render cells · max', max.toFixed(1), 'per cell');
+  await writeFile(path.join(OUT, 'population.bin'), Buffer.from(population.buffer));
+  return { file: 'population.bin', format: 'float32le people per render cell', total: Math.round(total), max: Number(max.toFixed(1)), cells, source: 'WorldPop 2020 UN-adjusted constrained (~100 m), CC BY 4.0' };
+}
+
 // --- Existing network sites --------------------------------------------------
 
 // Hand-placed placeholder sites, used only to fill gaps where OSM and
@@ -1355,6 +1411,7 @@ async function main() {
   const towerSite = candidates[0];
   const houses = await bakeHouses(grid, hand, places);
   await writeFile(path.join(OUT, 'houses.bin'), Buffer.from(houses.data.buffer));
+  const population = await bakePopulation(width, height);
   await bakeImagery();
 
   const metadata = {
@@ -1384,13 +1441,16 @@ async function main() {
       count: houses.data.length / 3,
       format: 'float32le lon,lat,heading',
       sources: houses.sources,
+      note: 'illustrative: drawn for the 3D view only; every count uses population',
     },
+    population,
     attribution: [
       'Elevation: NASA SRTM 1 arc-second (AWS Open Data elevation-tiles-prod)',
       'Imagery: Sentinel-2 cloudless 2020 by EOX IT Services, CC BY 4.0 (ESA Copernicus)',
       'Roads, railway, settlements, residential areas and buildings: OpenStreetMap contributors, ODbL',
       'Network sites: OpenStreetMap masts and communication towers, ODbL; OpenCellID when a key is present, CC BY-SA 4.0; hand-placed seeds where the map is empty',
       'Fuel sources: OpenStreetMap amenity=fuel, ODbL',
+      'Population: WorldPop 2020 UN-adjusted constrained, 100 m, CC BY 4.0 (worldpop.org)',
     ],
   };
   await writeFile(path.join(OUT, 'terrain.json'), JSON.stringify(metadata));

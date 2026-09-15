@@ -1091,9 +1091,9 @@ function RecommendationCard({
       <p
         className={`mt-2 text-[28px] font-semibold leading-none tracking-[-0.03em] tabular-nums ${tone === 'emerald' ? 'text-emerald-300' : 'text-amber-300'}`}
       >
-        {best.homesOnSignal.toLocaleString()}
+        {best.peopleOnSignal.toLocaleString()}
         <span className={`ml-1.5 text-sm font-medium ${tone === 'emerald' ? 'text-emerald-100/80' : 'text-amber-100/80'}`}>
-          homes kept on signal
+          people kept on signal
         </span>
       </p>
       <p className="mt-1 text-xs text-slate-300 tabular-nums">
@@ -1117,7 +1117,7 @@ function RecommendationCard({
                   {clockLabel(now, keep.by)}, when its road closes.
                 </>
               )}{' '}
-              Keeps {keep.homesKept.toLocaleString()} homes.
+              Keeps {keep.peopleKept.toLocaleString()} people.
             </span>
           </li>
         )}
@@ -1128,7 +1128,7 @@ function RecommendationCard({
             </span>
             <span>
               <span className="font-semibold text-white">Portable tower at {tower.site.candidate.name}</span>: reconnects{' '}
-              {tower.homesReconnected.toLocaleString()} {keep ? 'more ' : ''}homes · microwave to{' '}
+              {tower.peopleReconnected.toLocaleString()} {keep ? 'more ' : ''}people · microwave to{' '}
               {siteNames[tower.backhaulTo] ?? tower.backhaulTo}, {tower.backhaulKm} km line of sight ·{' '}
               {tower.site.candidate.handDm >= 254 ? 'well above' : `+${margin.toFixed(1)} m above`} the planned flood ·{' '}
               {tower.site.routeKm.toFixed(1)} km by road
@@ -1146,14 +1146,14 @@ function RecommendationCard({
           <ul className="mt-1 space-y-1">
             {alternatives.map((plan, i) => (
               <li key={i} className="tabular-nums">
-                {planTitle(plan, now)} — {plan.homesOnSignal.toLocaleString()} homes
+                {planTitle(plan, now)} — {plan.peopleOnSignal.toLocaleString()} people
               </li>
             ))}
           </ul>
         </div>
       )}
       <p className="mt-2 text-[11px] text-slate-500">
-        Plans are ranked by homes on signal at the planned hour; a tower counts only what it adds beyond a
+        Plans are ranked by people on signal at the planned hour; a tower counts only what it adds beyond a
         kept site, and needs a microwave link to a site that is alive in the plan. Tap another site on the
         map to preview its coverage.
       </p>
@@ -1254,7 +1254,7 @@ function RouteControls({
           </p>
           <p className="mt-1 text-[11px] text-slate-500">
             Dry high ground within reach of a lit road; each label counts the
-            homes without signal at the planned hour that the mast would see.
+            people without signal at the planned hour that the mast would see.
           </p>
         </div>
       )}
@@ -1275,10 +1275,10 @@ function RouteControls({
         <p className="mt-3 rounded-lg border border-slate-600/30 bg-slate-900/35 px-3 py-2.5 text-xs text-slate-300 tabular-nums">
           Without signal at {plannedClock}:{' '}
           <span className={withoutSignal > 0 ? 'font-semibold text-red-200' : 'font-semibold text-emerald-200'}>
-            {withoutSignal.toLocaleString()} homes
+            {withoutSignal.toLocaleString()} people
           </span>
           <span className="block text-[11px] text-slate-500">
-            Homes with signal now that no surviving site covers at the planned hour.
+            People with signal now that no surviving site covers at the planned hour.
           </span>
         </p>
       )}
@@ -1678,13 +1678,13 @@ export function ResilinetDashboard() {
         )
       : sites;
     // For checking against the labels on the map.
-    console.log(`without signal at +${forecastHour} h: ${hole.count} of ${hole.coveredNow} homes covered now`);
+    console.log(`without signal at +${forecastHour} h: ${hole.count} of ${hole.coveredNow} people covered now`);
     console.table(
       sites.map((site) => ({
         candidate: site.candidate.name,
         'route km': Number(site.routeKm.toFixed(1)),
-        'in hole': site.homesReconnected,
-        'homes covered': site.homesCovered,
+        'people in hole': site.peopleReconnected,
+        'people covered': site.peopleCovered,
         links: site.backhaulOptions
           .filter((o) => usable.has(o.siteId))
           .slice(0, 3)
@@ -1698,7 +1698,7 @@ export function ResilinetDashboard() {
         method: o.method,
         by: `+${o.by} h`,
         route: o.routeKm === null ? '—' : `${o.routeKm} km`,
-        'homes kept': o.homesKept,
+        'people kept': o.peopleKept,
       })),
     );
     const failures: Record<string, number | null> = {};

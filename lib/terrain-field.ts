@@ -124,6 +124,8 @@ export type TerrainMeta = {
   sites: Site[];
   towerSite: TowerSite;
   houses: { file: string; count: number };
+  /** WorldPop people per render cell. */
+  population: { file: string; total: number; max: number; cells: number; source: string };
   attribution: string[];
 };
 
@@ -138,6 +140,8 @@ export type TerrainData = {
   houses: Float32Array;
   /** Road + rail graph; its edges are also the drawn road geometry. */
   graph: RoadGraph;
+  /** People per render cell (WorldPop), row-major, north row first. */
+  population: Float32Array;
   width: number;
   height: number;
 };
@@ -250,11 +254,12 @@ export async function loadTerrain(base = '/terrain'): Promise<TerrainData> {
     throw new Error(`Failed to load terrain metadata: ${metaResponse.status}`);
   }
   const meta = (await metaResponse.json()) as TerrainMeta;
-  const [elevationBuffer, handBuffer, houseBuffer, graph, surface] =
+  const [elevationBuffer, handBuffer, houseBuffer, populationBuffer, graph, surface] =
     await Promise.all([
       loadBinary(`${base}/elevation.bin`),
       loadBinary(`${base}/hand.bin`),
       loadBinary(`${base}/${meta.houses.file}`),
+      loadBinary(`${base}/${meta.population.file}`),
       loadJson<RoadGraph>(`${base}/${meta.roads.file}`),
       loadImageBitmap(`${base}/${meta.texture.file}`),
     ]);
@@ -264,6 +269,7 @@ export async function loadTerrain(base = '/terrain'): Promise<TerrainData> {
     elevation: new Int16Array(elevationBuffer),
     hand: new Uint8Array(handBuffer),
     houses: new Float32Array(houseBuffer),
+    population: new Float32Array(populationBuffer),
     graph,
     surface,
     width: meta.grid.width,

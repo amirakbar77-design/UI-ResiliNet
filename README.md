@@ -2,7 +2,7 @@
 
 An isolated, frontend-only interface prototype for the ResiliNet 3D disaster-response dashboard.
 
-This project does not import from or modify the working ResiliNet application, and it contains no backend, persistence, or operational data. Its economics and population figures are illustrative placeholders; its terrain, hydrology, and line-of-sight geometry are derived from open data at build time.
+This project does not import from or modify the working ResiliNet application, and it contains no backend, persistence, or operational data. Its economics are illustrative placeholders; its terrain, hydrology, population, and line-of-sight geometry are derived from open data at build time.
 
 ## Run locally
 
@@ -22,7 +22,8 @@ The map is a three.js scene built from real data for the Sungai Galas valley in 
 - **Surface** — Sentinel-2 cloudless imagery draped as a 4096² mercator texture, with per-vertex UVs computed from longitude/latitude.
 - **Flood layer** — a real HAND (Height Above Nearest Drainage) raster, computed at bake time by priority-flood sink filling, a D8 drainage tree, flow accumulation, and a downstream walk to the nearest channel. The flood level is a HAND threshold between 0.5 m and 14 m — set by the gauge reading in the Now stage and by the forecast curve afterwards — and the water sheet sits on the drainage datum plus that level.
 - **Roads and railway** — the baked road graph (classified and unclassified OSM roads plus the KTM East Coast line), draped on the terrain and coloured red wherever the cut rule below says the water has closed it.
-- **Homes** — OSM building footprints where they exist; elsewhere illustrative houses fill OSM residential areas (one per 0.15 ha) and cluster around OSM settlement nodes, so each kampung reads as a community. Homes are drawn about three times their true footprint for legibility and turn red once the flood reaches them; the badge counts them and each settlement marker shows the number of homes within 1.2 km — an indication of scale, not a census.
+- **Population** — WorldPop 2020, UN-adjusted, constrained to built-up areas, ~100 m (CC BY 4.0; `hub.worldpop.org/geodata/summary?id=49771`), cropped to the AOI and summed onto the render grid as `population.bin`. **Every count in the app — without signal, reconnected, kept on signal, the settlement labels — is people from this raster.**
+- **Homes** — drawn for the 3D view only, and illustrative: OSM building footprints where they exist, elsewhere houses filling OSM residential areas (one per 0.15 ha) and clustered around settlement nodes, so a kampung reads as a community. They turn red once the flood reaches them. They are never counted.
 - **Coverage** — a line-of-sight viewshed (`lib/viewshed.ts`, 96 rays × 60 rings, 9 km, 32 m mast) marched over the real elevation grid, so ridges genuinely shadow it. The same mask draws the fans and counts the homes a mast can see.
 - **Tower candidates** — patches of dry ground 40–350 m above the floodplain datum, within 4 km of a settlement and 300 m of a road, at least 1 km apart, and **buildable**: the site and its ring of 30 m neighbours must all be under a 10° slope, so hillsides that score well on line of sight but could never take a truck-mounted mast are excluded. Each is named after its nearest settlement; the first is the opening concept tower. The slope test reads SRTM at 30 m, so it accepts gentle average slopes — a real siting pass would use LiDAR plus a ground and access check.
 
@@ -70,7 +71,7 @@ In this valley every real site sits on dry ground, so inundation is rare and **p
 
 ## The coverage hole
 
-Flooding alone does not take a home off the network — a flooded home under a working site still has signal. `coverageHole` in `lib/network.ts` unions the line-of-sight viewsheds (9 km, each site's mast height) of the sites that are live now and of those still live at the planned hour; the **hole** is the homes covered now that no surviving site covers then. That count — "without signal at HH:MM" — is the headline number of the Site stage, and it moves only when a site's status changes, not with the gauge.
+Flooding alone does not take anyone off the network — a flooded home under a working site still has signal. `coverageHole` in `lib/network.ts` unions the line-of-sight viewsheds (9 km, each site's mast height) of the sites that are live now and of those still live at the planned hour; the **hole** is the people (WorldPop cells, `lib/population.ts`) covered now that no surviving site covers then. That count — "without signal at HH:MM" — is the headline number of the Site stage, and it moves only when a site's status changes, not with the gauge.
 
 The planning hour defaults to the **outage hour** — the last site failure inside the horizon, since nothing recovers in the model — not the river peak. Sites starve hours after the roads close, so the network is usually at its worst *after* the water is; at the default gauge the river peaks at +10 h while the last site goes dark at +12 h, and planning for the river peak would find no hole at all. The timeline pins both ("Peak · 8.9 m" and "Outage · 10 of 12 dark"), the button reads "Plan for the outage", and the officer can still pick any hour. During the route wave the fans of the sites the plan loses fade from emerald to grey, staggered by failure hour; survivors' fans stay faintly green. The darker patch left with no fan over it is the hole.
 
@@ -94,7 +95,7 @@ Drag to pan across the terrain. On a trackpad, pinch zooms toward the pointer, a
 npm run bake:terrain
 ```
 
-The script downloads its inputs once into `.cache/` (gitignored) and writes `elevation.bin`, `hand.bin`, `houses.bin`, `roads.json`, `surface.jpg`, and `terrain.json`. `node scripts/make-forecast.mjs` regenerates the illustrative forecast.
+The script downloads its inputs once into `.cache/` (gitignored) and writes `elevation.bin`, `hand.bin`, `houses.bin`, `population.bin`, `roads.json`, `surface.jpg`, and `terrain.json`. `node scripts/check-hole.mjs` prints the hole in people next to the illustrative-house count it replaced. `node scripts/make-forecast.mjs` regenerates the illustrative forecast.
 
 ## Data sources
 
