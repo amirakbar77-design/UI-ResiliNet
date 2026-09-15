@@ -7,7 +7,7 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 
 import { type Forecast, rainAt } from '@/lib/forecast';
 import { cutMask, type RouteEvaluation } from '@/lib/routing';
-import type { FailureCause, SiteStatus } from '@/lib/network';
+import { type FailureCause, SITE_COVERAGE_RADIUS_METRES, type SiteStatus } from '@/lib/network';
 import type { SiteAssessment } from '@/lib/sites';
 import { viewshedMask, type ViewshedMask } from '@/lib/viewshed';
 
@@ -89,6 +89,7 @@ type SceneHandle = {
   playRouteWave: (
     evaluation: RouteEvaluation,
     sites: SiteAssessment[],
+    network: RouteNetwork,
     callbacks: {
       onProgress: (state: { reachableKm: number; cuts: number }) => void;
       onDone: () => void;
@@ -703,6 +704,7 @@ function createScene(
     onDone: () => void;
     /** Candidate sites to spawn once the wave settles. */
     sites: SiteAssessment[];
+    network: RouteNetwork;
     onSiteSpawn: (id: string) => void;
     onSitesDone: () => void;
   };
@@ -896,6 +898,7 @@ function createScene(
       }
     }
     wave.onProgress({ reachableKm: litKm, cuts });
+    paintSiteFans(wave.done ? 1 : progressKm / (evaluation.maxKm + 1), wave.network);
   };
 
   const settleWave = () => {
@@ -1090,10 +1093,15 @@ function createScene(
     const showTower = wave === null;
     towerGroup.visible = showTower && (layerState?.towers ?? true);
     coverageGroup.visible = showTower && (layerState?.coverage ?? true);
+    // Existing sites' fans only show during a route run: they are the hole.
+    siteFanGroup.visible = wave !== null && (layerState?.coverage ?? true);
   };
 
   const coverageGroup = new THREE.Group();
   scene.add(coverageGroup);
+  const siteFanGroup = new THREE.Group();
+  siteFanGroup.visible = false;
+  scene.add(siteFanGroup);
 
   // A coverage fan: one vertex per viewshed sample, draped on the terrain,
   // alpha where the mast has line of sight and fading with distance. The
@@ -1155,7 +1163,61 @@ function createScene(
       }),
     );
     mesh.renderOrder = 3;
+    // Per-vertex alpha kept aside so the fan can be re-tinted later.
+    const alphas = new Float32Array(shades.length / 4);
+    for (let i = 0; i < alphas.length; i += 1) alphas[i] = shades[i * 4 + 3]!;
+    mesh.userData.alphas = alphas;
     return mesh;
+  };
+
+  /** Rewrites a fan's colour to `tint` with its alpha scaled, keeping the shape. */
+  const tintFan = (fan: THREE.Mesh, tint: THREE.Color, alphaScale: number) => {
+    const key = `${tint.getHex()}:${alphaScale.toFixed(3)}`;
+    if (fan.userData.tintKey === key) return;
+    fan.userData.tintKey = key;
+    const attribute = fan.geometry.getAttribute('color') as THREE.BufferAttribute;
+    const array = attribute.array as Float32Array;
+    const alphas = fan.userData.alphas as Float32Array;
+    for (let i = 0; i < alphas.length; i += 1) {
+      array[i * 4] = tint.r;
+      array[i * 4 + 1] = tint.g;
+      array[i * 4 + 2] = tint.b;
+      array[i * 4 + 3] = alphas[i]! * alphaScale;
+    }
+    attribute.needsUpdate = true;
+  };
+
+  // One fan per existing site, built once; greyed as the forecast takes the
+  // site down during the route wave.
+  const siteFans = new Map<string, THREE.Mesh>();
+  for (const site of meta.sites) {
+    const fan = buildFan(
+      site,
+      viewshedMask(terrain, site, site.mastMetres, SITE_COVERAGE_RADIUS_METRES),
+    );
+    siteFans.set(site.id, fan);
+    siteFanGroup.add(fan);
+  }
+  const deadFanColor = new THREE.Color('#7c8594');
+  const fanTint = new THREE.Color();
+  const SURVIVOR_FAN_ALPHA = 0.5;
+  const DEAD_FAN_ALPHA = 0.3;
+
+  /** Fades the fans of sites the plan has lost, staggered by failure hour, as the wave runs 0→1. */
+  const paintSiteFans = (progress: number, network: RouteNetwork) => {
+    const horizon = Math.max(1, network.plannedHour);
+    for (const [id, fan] of siteFans) {
+      const failure = network.failures[id];
+      const dead = failure !== null && failure !== undefined && failure <= network.plannedHour;
+      if (!dead) {
+        tintFan(fan, emerald, SURVIVOR_FAN_ALPHA);
+        continue;
+      }
+      const start = 0.15 + 0.6 * clamp(failure / horizon, 0, 1);
+      const f = clamp((progress - start) / 0.15, 0, 1);
+      fanTint.copy(emerald).lerp(deadFanColor, f);
+      tintFan(fan, fanTint, SURVIVOR_FAN_ALPHA + (DEAD_FAN_ALPHA - SURVIVOR_FAN_ALPHA) * f);
+    }
   };
 
   const buildCoverage = () => {
@@ -1673,8 +1735,9 @@ function createScene(
     metrics() {
       return { severedKm, floodedKm2, homesFlooded };
     },
-    playRouteWave(evaluation, sites, callbacks) {
+    playRouteWave(evaluation, sites, network, callbacks) {
       clearWave();
+      for (const fan of siteFans.values()) tintFan(fan, emerald, SURVIVOR_FAN_ALPHA);
       for (const crossing of evaluation.blocked) {
         const mesh = new THREE.Mesh(blockGeometry, blockMaterial);
         mesh.position.copy(worldOf(crossing.lon, crossing.lat, 8));
@@ -1690,6 +1753,7 @@ function createScene(
         onProgress: callbacks.onProgress,
         onDone: callbacks.onDone,
         sites,
+        network,
         onSiteSpawn: callbacks.onSiteSpawn,
         onSitesDone: callbacks.onSitesDone,
       };
@@ -1863,8 +1927,16 @@ export type RouteRun = {
   evaluation: RouteEvaluation;
   /** Reachable candidates in spawn order, with their viewsheds. */
   sites: SiteAssessment[];
+  /** Which existing sites go dark, and by when the plan is judged. */
+  network: RouteNetwork;
   /** True once the officer asked to skip the animation. */
   skip: boolean;
+};
+
+export type RouteNetwork = {
+  /** Forecast hour each existing site fails, or null if it survives. */
+  failures: Record<string, number | null>;
+  plannedHour: number;
 };
 
 export function Terrain3D({
@@ -1983,14 +2055,15 @@ export function Terrain3D({
   // are stable, so the wave only restarts when the evaluation changes.
   const routeEvaluation = routeRun?.evaluation ?? null;
   const routeSites = routeRun?.sites ?? null;
+  const routeNetwork = routeRun?.network ?? null;
   useEffect(() => {
     const scene = sceneRef.current;
     if (!scene) return;
-    if (routeEvaluation === null || routeSites === null) {
+    if (routeEvaluation === null || routeSites === null || routeNetwork === null) {
       scene.clearRouteWave();
       return;
     }
-    scene.playRouteWave(routeEvaluation, routeSites, {
+    scene.playRouteWave(routeEvaluation, routeSites, routeNetwork, {
       onProgress: onRouteProgress,
       onDone: onRouteDone,
       onSiteSpawn,
@@ -1999,6 +2072,7 @@ export function Terrain3D({
   }, [
     routeEvaluation,
     routeSites,
+    routeNetwork,
     onRouteProgress,
     onRouteDone,
     onSiteSpawn,
@@ -2097,7 +2171,7 @@ export function Terrain3D({
                       {anchor.label}
                     </div>
                     <div className="mt-0.5 pl-6 text-xs text-emerald-100/85 tabular-nums">
-                      reaches {site?.homesReconnected ?? 0} cut-off homes
+                      reconnects {site?.homesReconnected ?? 0} homes without signal
                     </div>
                   </div>
                   <div className="grid size-9 place-items-center rounded-full border-2 border-white bg-emerald-400 text-emerald-950 shadow-[0_0_0_7px_rgb(52_211_153/22%)]">
@@ -2110,7 +2184,7 @@ export function Terrain3D({
                   type="button"
                   onClick={() => onPreview(anchor.id)}
                   aria-pressed={previewId === anchor.id}
-                  title={`${anchor.label}: reaches ${site?.homesReconnected ?? 0} cut-off homes`}
+                  title={`${anchor.label}: reconnects ${site?.homesReconnected ?? 0} homes without signal`}
                   className={`pointer-events-auto flex min-h-7 -translate-x-1/2 -translate-y-1/2 items-center gap-1.5 whitespace-nowrap rounded-full border px-2 text-[11px] font-semibold tabular-nums backdrop-blur-sm transition-colors ${
                     previewId === anchor.id
                       ? 'border-sky-300/60 bg-sky-500/30 text-white'
@@ -2125,7 +2199,7 @@ export function Terrain3D({
                   <div className="mb-1 whitespace-nowrap rounded-md border border-emerald-300/30 bg-[#07131d]/85 px-2 py-1 text-[11px] leading-4 backdrop-blur-sm">
                     <span className="font-semibold text-white">{anchor.label}</span>
                     <span className="block text-emerald-200/90 tabular-nums">
-                      reaches {site?.homesReconnected ?? 0} cut-off homes
+                      reconnects {site?.homesReconnected ?? 0} homes without signal
                     </span>
                   </div>
                   <span className="size-2.5 rounded-full border-2 border-white bg-emerald-400 shadow-[0_0_0_4px_rgb(52_211_153/25%)]" />

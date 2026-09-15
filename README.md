@@ -68,9 +68,15 @@ Failures beyond the forecast horizon count as surviving it. The officer can forc
 
 In this valley every real site sits on dry ground, so inundation is rare and **power after the access road closes** dominates — which is what MCMC reported in November 2024.
 
+## The coverage hole
+
+Flooding alone does not take a home off the network — a flooded home under a working site still has signal. `coverageHole` in `lib/network.ts` unions the line-of-sight viewsheds (9 km, each site's mast height) of the sites that are live now and of those still live at the planned hour; the **hole** is the homes covered now that no surviving site covers then. That count — "without signal at HH:MM" — is the headline number of the Site stage, and it moves only when a site's status changes, not with the gauge.
+
+The planning hour defaults to the **outage hour** — the last site failure inside the horizon, since nothing recovers in the model — not the river peak. Sites starve hours after the roads close, so the network is usually at its worst *after* the water is; at the default gauge the river peaks at +10 h while the last site goes dark at +12 h, and planning for the river peak would find no hole at all. The timeline pins both ("Peak · 8.9 m" and "Outage · 10 of 12 dark"), the button reads "Plan for the outage", and the officer can still pick any hour. During the route wave the fans of the sites the plan loses fade from emerald to grey, staggered by failure hour; survivors' fans stay faintly green. The darker patch left with no fan over it is the hole.
+
 ## Site evaluation
 
-`lib/sites.ts`: a candidate is assessed if the route wave reached its road node at today's level. Its score is the number of homes that are under water at the planned hour *and* inside its viewshed — the homes it would reconnect. The winner has the highest count; a tie goes to the shorter road. The card reports the winner's height above the planned flood, road distance from the depot, and the count; the browser console logs the full table.
+`lib/sites.ts`: a candidate is assessed if the route wave reached its road node at today's level. Its score is the number of homes in the hole at the planned hour *and* inside its viewshed — the homes without signal it would reconnect. The winner has the highest count; a tie goes to the shorter road. The card reports the winner's height above the planned flood, road distance from the depot, and the count against the size of the hole; the browser console logs the full table.
 
 ## Moving around
 

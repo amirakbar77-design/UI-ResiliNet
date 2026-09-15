@@ -18,6 +18,7 @@
 import type { FloodCurve } from './forecast.ts';
 import { routeFrom } from './routing.ts';
 import type { Site, TerrainData } from './terrain-field.ts';
+import { viewshedMask, type ViewshedMask } from './viewshed.ts';
 
 // --- Constants (illustrative) ------------------------------------------------
 /** Hours a site runs on battery after the grid drops. Real: per-site runway from the operator's NOC. */
@@ -52,6 +53,13 @@ export type NetworkAssessment = {
   darkAt: (hour: number) => number;
   /** Ids of sites still up (or on battery) at a forecast hour. */
   liveAt: (hour: number) => string[];
+  /**
+   * The hour the network is at its worst within the horizon — the last
+   * failure, since nothing recovers in the model — or null if nothing fails.
+   * Sites starve hours after the roads close, so this is usually later than
+   * the river peak; it is the hour a portable tower should be planned for.
+   */
+  outageHour: number | null;
   summary: { total: number; up: number; battery: number; down: number };
 };
 
@@ -175,11 +183,75 @@ export function assessNetwork(
     sites.filter((s) => s.failureHour !== null && s.failureHour <= hour).length;
   const liveAt = (hour: number) =>
     sites.filter((s) => s.failureHour === null || s.failureHour > hour).map((s) => s.id);
+  let outageHour: number | null = null;
+  for (const s of sites) {
+    if (s.failureHour !== null && (outageHour === null || s.failureHour > outageHour)) outageHour = s.failureHour;
+  }
   const summary = {
     total: sites.length,
     up: sites.filter((s) => s.status === 'up').length,
     battery: sites.filter((s) => s.status === 'battery').length,
     down: sites.filter((s) => s.status === 'down').length,
   };
-  return { sites, darkAt, liveAt, summary };
+  return { sites, darkAt, liveAt, outageHour, summary };
+}
+
+// --- Coverage and the hole -------------------------------------------------
+
+/** Macro-site coverage radius; one value for every site until real data says otherwise. */
+export const SITE_COVERAGE_RADIUS_METRES = 9000;
+
+/** Line-of-sight viewshed per existing site; sites do not move, so compute once. */
+export function siteViewsheds(terrain: TerrainData, sites: Site[] = terrain.meta.sites) {
+  const masks = new Map<string, ViewshedMask>();
+  for (const site of sites) {
+    masks.set(site.id, viewshedMask(terrain, site, site.mastMetres, SITE_COVERAGE_RADIUS_METRES));
+  }
+  return masks;
+}
+
+/** Union of the viewsheds of the sites in `liveIds`. */
+export function coverageAt(masks: Map<string, ViewshedMask>, liveIds: string[]) {
+  const live = liveIds.map((id) => masks.get(id)).filter((m): m is ViewshedMask => m !== undefined);
+  return {
+    covers: (lon: number, lat: number) => live.some((mask) => mask.covers(lon, lat)),
+  };
+}
+
+export type CoverageHole = {
+  /** 1 for each home that has signal now and none at the hour. */
+  mask: Uint8Array;
+  count: number;
+  /** Homes with signal now, for context. */
+  coveredNow: number;
+};
+
+/**
+ * The hole at `hour`: homes covered by a live site right now that no site
+ * still live at `hour` covers. Flooding alone does not put a home here — a
+ * flooded home under a working site still has signal.
+ */
+export function coverageHole(
+  terrain: TerrainData,
+  masks: Map<string, ViewshedMask>,
+  network: NetworkAssessment,
+  hour: number,
+): CoverageHole {
+  const { houses } = terrain;
+  const count = houses.length / 3;
+  const now = coverageAt(masks, network.liveAt(0));
+  const later = coverageAt(masks, network.liveAt(hour));
+  const mask = new Uint8Array(count);
+  let holes = 0;
+  let coveredNow = 0;
+  for (let i = 0; i < count; i += 1) {
+    const lon = houses[i * 3]!;
+    const lat = houses[i * 3 + 1]!;
+    if (!now.covers(lon, lat)) continue;
+    coveredNow += 1;
+    if (later.covers(lon, lat)) continue;
+    mask[i] = 1;
+    holes += 1;
+  }
+  return { mask, count: holes, coveredNow };
 }

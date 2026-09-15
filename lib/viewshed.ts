@@ -3,7 +3,7 @@
  * fans and the site evaluation so both agree on what a mast can see.
  */
 
-import { clamp, metresPerDegreeLon, type TerrainData } from './terrain-field';
+import { clamp, metresPerDegreeLon, type TerrainData } from './terrain-field.ts';
 
 export const VIEWSHED_SPOKES = 96;
 export const VIEWSHED_RINGS = 60;

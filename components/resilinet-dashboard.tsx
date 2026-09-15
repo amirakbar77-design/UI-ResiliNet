@@ -48,10 +48,12 @@ import {
 } from '@/lib/forecast';
 import {
   assessNetwork,
+  coverageHole,
   type FailureCause,
   type NetworkAssessment,
   type Overrides,
   type SiteStatus,
+  siteViewsheds,
 } from '@/lib/network';
 import { evaluateRoutes, type RouteEvaluation } from '@/lib/routing';
 import { assessSites, type SiteAssessment } from '@/lib/sites';
@@ -686,6 +688,8 @@ function ForecastTimeline({
   const peakHour = curve.peakHour();
   const peakLevel = curve.peakLevel();
   const atPeak = Math.abs(hour - peakHour) < HOUR_STEP / 2;
+  const outageHour = network?.outageHour ?? null;
+  const atOutage = outageHour !== null && Math.abs(hour - outageHour) < HOUR_STEP / 2;
   const level = curve.levelAt(hour);
   const h0 = Math.floor(hour);
   const h1 = Math.min(h0 + 1, maxHour);
@@ -769,6 +773,11 @@ function ForecastTimeline({
                 Peak
               </span>
             )}
+            {atOutage && (
+              <span className="ml-2 rounded border border-red-300/25 bg-red-400/10 px-1.5 py-0.5 text-[10px] font-semibold tracking-[0.08em] text-red-200 uppercase">
+                Outage
+              </span>
+            )}
           </p>
           {network && (
             <p className="mt-0.5 text-[11px] text-slate-400 tabular-nums">
@@ -805,7 +814,7 @@ function ForecastTimeline({
           onClick={onNext}
           className="min-h-11 rounded-lg bg-sky-400 px-4 text-sm font-semibold text-slate-950 hover:bg-sky-300"
         >
-          {atPeak ? 'Plan for the peak' : 'Plan for this hour'}
+          {atOutage ? 'Plan for the outage' : atPeak ? 'Plan for the peak' : 'Plan for this hour'}
         </Button>
       </div>
 
@@ -944,6 +953,39 @@ function ForecastTimeline({
           >
             Peak · {peakLevel.toFixed(1)} m
           </text>
+          {/* outage pin: the hour the network is at its worst */}
+          {outageHour !== null && network && (
+            <g>
+              <line
+                x1={x(outageHour)}
+                x2={x(outageHour)}
+                y1={CHART_MT + 2}
+                y2={baseline}
+                stroke="rgb(248 113 113 / 0.7)"
+                strokeWidth={1}
+                strokeDasharray="2 3"
+              />
+              <rect
+                x={clamp(x(outageHour) - 46, CHART_ML, CHART_W - CHART_MR - 92)}
+                y={CHART_MT + 2}
+                width={92}
+                height={14}
+                rx={3}
+                fill="rgb(69 10 10 / 0.85)"
+                stroke="rgb(248 113 113 / 0.5)"
+              />
+              <text
+                x={clamp(x(outageHour) - 46, CHART_ML, CHART_W - CHART_MR - 92) + 46}
+                y={CHART_MT + 12}
+                textAnchor="middle"
+                fontSize={9}
+                fontWeight={600}
+                fill="rgb(254 202 202)"
+              >
+                Outage · {network.darkAt(outageHour)} of {network.summary.total} dark
+              </text>
+            </g>
+          )}
           {/* site failures: a tick per site at the hour it goes dark */}
           {failureTicks.map((tick, i) => (
             <line
@@ -1007,6 +1049,8 @@ function RouteControls({
   ready,
   plannedLevel,
   plannedLabel,
+  plannedClock,
+  withoutSignal,
   onStart,
   onSkip,
 }: {
@@ -1014,6 +1058,9 @@ function RouteControls({
   ready: boolean;
   plannedLevel: number;
   plannedLabel: string;
+  plannedClock: string;
+  /** Homes with signal now and none at the planned hour; null until known. */
+  withoutSignal: number | null;
   onStart: () => void;
   onSkip: () => void;
 }) {
@@ -1090,7 +1137,7 @@ function RouteControls({
           </p>
           <p className="mt-1 text-[11px] text-slate-500">
             Dry high ground within reach of a lit road; each label counts the
-            homes under water at the planned hour that the mast would see.
+            homes without signal at the planned hour that the mast would see.
           </p>
         </div>
       )}
@@ -1107,6 +1154,9 @@ function RouteControls({
             <span className="ml-1.5 text-sm font-medium text-emerald-100/80">
               homes reconnected
             </span>
+          </p>
+          <p className="mt-1 text-xs text-emerald-100/70 tabular-nums">
+            of {route.withoutSignal.toLocaleString()} without signal at {plannedClock}
           </p>
           <ul className="mt-3 space-y-1.5 text-xs text-slate-200 tabular-nums">
             <li>
@@ -1132,14 +1182,25 @@ function RouteControls({
             Planning for {plannedLabel}
           </p>
           <p className="mt-3 text-[11px] text-slate-500">
-            Highest count of cut-off homes among {route.sites.length} reachable
-            sites; ties go to the shorter road. Tap another site on the map to
-            preview its coverage.
+            Highest count of homes without signal among {route.sites.length}{' '}
+            reachable sites; ties go to the shorter road. Tap another site on
+            the map to preview its coverage.
           </p>
         </div>
       )}
       {!ready && (
         <p className="mt-2 text-[11px] text-slate-500">Loading road network…</p>
+      )}
+      {withoutSignal !== null && (
+        <p className="mt-3 rounded-lg border border-slate-600/30 bg-slate-900/35 px-3 py-2.5 text-xs text-slate-300 tabular-nums">
+          Without signal at {plannedClock}:{' '}
+          <span className={withoutSignal > 0 ? 'font-semibold text-red-200' : 'font-semibold text-emerald-200'}>
+            {withoutSignal.toLocaleString()} homes
+          </span>
+          <span className="block text-[11px] text-slate-500">
+            Homes with signal now that no surviving site covers at the planned hour.
+          </span>
+        </p>
       )}
     </section>
   );
@@ -1154,6 +1215,8 @@ function StageContent({
   routesReady,
   plannedLevel,
   plannedLabel,
+  plannedClock,
+  withoutSignal,
   network,
   onStartRoutes,
   onSkipRoutes,
@@ -1211,6 +1274,8 @@ function StageContent({
             ready={routesReady}
             plannedLevel={plannedLevel}
             plannedLabel={plannedLabel}
+            plannedClock={plannedClock}
+            withoutSignal={withoutSignal}
             onStart={onStartRoutes}
             onSkip={onSkipRoutes}
           />
@@ -1237,6 +1302,10 @@ type RouteState = {
   winnerId: string | null;
   /** Runner-up being previewed on the map. */
   previewId: string | null;
+  /** Homes in the coverage hole at the planned hour, when Start was pressed. */
+  withoutSignal: number;
+  /** Existing-site failure hours and the planned hour, for the scene's fans. */
+  network: RouteRun['network'];
 };
 
 /** Highest homes reconnected wins; a tie goes to the shorter road. */
@@ -1264,6 +1333,8 @@ type StageProps = {
   routesReady: boolean;
   plannedLevel: number;
   plannedLabel: string;
+  plannedClock: string;
+  withoutSignal: number | null;
   network: NetworkAssessment | null;
   onStartRoutes: () => void;
   onSkipRoutes: () => void;
@@ -1440,12 +1511,23 @@ export function ResilinetDashboard() {
     () => (forecast ? floodCurve(forecast, gaugeToHandLevel(gauge)) : null),
     [forecast, gauge],
   );
-  const forecastHour = chosenHour ?? curve?.peakHour() ?? 0;
-
   // Existing-network status and failure hours follow the gauge and the curve.
   const network = useMemo(
     () => (terrain && curve ? assessNetwork(terrain, curve, siteOverrides) : null),
     [terrain, curve, siteOverrides],
+  );
+  // Plan for the outage by default — the network is at its worst hours after
+  // the river peak, because sites starve once the roads close — and for the
+  // river peak only when nothing fails.
+  const forecastHour = chosenHour ?? network?.outageHour ?? curve?.peakHour() ?? 0;
+  // Existing-site viewsheds never change; the hole follows the failures.
+  const siteMasks = useMemo(() => (terrain ? siteViewsheds(terrain) : null), [terrain]);
+  const hole = useMemo(
+    () =>
+      terrain && network && siteMasks
+        ? coverageHole(terrain, siteMasks, network, forecastHour)
+        : null,
+    [terrain, network, siteMasks, forecastHour],
   );
   const siteStates = useMemo(() => {
     const states: Record<string, SiteMarkerState> = {};
@@ -1475,7 +1557,8 @@ export function ResilinetDashboard() {
   // hour (falling back to the gauge if the forecast file is unavailable).
   const plannedLevel = curve ? curve.levelAt(forecastHour) : gaugeToHandLevel(gauge);
   const level = stage === 'now' ? gaugeToHandLevel(gauge) : plannedLevel;
-  const plannedLabel = `${clockLabel(now, forecastHour)} (+${forecastHour.toFixed(0)} h) · ${plannedLevel.toFixed(1)} m`;
+  const plannedClock = clockLabel(now, forecastHour);
+  const plannedLabel = `${plannedClock} (+${forecastHour.toFixed(0)} h) · ${plannedLevel.toFixed(1)} m`;
   // The forecast is read from above; every other stage is on the ground.
   // Now: the home oblique. Forecast: top-down. Site: from behind the depot,
   // so the route wave starts in the foreground and runs away down the valley.
@@ -1488,9 +1571,9 @@ export function ResilinetDashboard() {
   };
   const onNext = () => changeStage(stage === 'now' ? 'forecast' : 'site');
 
-  const routesReady = terrain !== null && curve !== null;
+  const routesReady = terrain !== null && curve !== null && hole !== null;
   const onStartRoutes = () => {
-    if (!terrain || !curve) return;
+    if (!terrain || !curve || !hole || !network) return;
     const evaluation = evaluateRoutes(
       terrain.graph,
       terrain.meta.depot.node,
@@ -1498,12 +1581,9 @@ export function ResilinetDashboard() {
       curve.levels,
       curve.peakHour(),
     );
-    const sites = assessSites(
-      terrain,
-      evaluation.distanceByNode,
-      curve.levelAt(forecastHour),
-    );
+    const sites = assessSites(terrain, evaluation.distanceByNode, hole.mask);
     // For checking against the labels on the map.
+    console.log(`without signal at +${forecastHour} h: ${hole.count} of ${hole.coveredNow} homes covered now`);
     console.table(
       sites.map((site) => ({
         candidate: site.candidate.name,
@@ -1512,6 +1592,8 @@ export function ResilinetDashboard() {
         'homes covered': site.homesCovered,
       })),
     );
+    const failures: Record<string, number | null> = {};
+    for (const s of network.sites) failures[s.id] = s.failureHour;
     setRoute((current) => ({
       id: (current?.id ?? 0) + 1,
       evaluation,
@@ -1524,6 +1606,8 @@ export function ResilinetDashboard() {
       sitesDone: false,
       winnerId: pickWinner(sites),
       previewId: null,
+      withoutSignal: hole.count,
+      network: { failures, plannedHour: forecastHour },
     }));
   };
   const onSkipRoutes = () =>
@@ -1570,7 +1654,13 @@ export function ResilinetDashboard() {
   const routeRun: RouteRun | null = useMemo(
     () =>
       route
-        ? { id: route.id, evaluation: route.evaluation, sites: route.sites, skip: route.skip }
+        ? {
+            id: route.id,
+            evaluation: route.evaluation,
+            sites: route.sites,
+            network: route.network,
+            skip: route.skip,
+          }
         : null,
     [route],
   );
@@ -1585,6 +1675,8 @@ export function ResilinetDashboard() {
     routesReady,
     plannedLevel,
     plannedLabel,
+    plannedClock,
+    withoutSignal: hole?.count ?? null,
     network,
     onStartRoutes,
     onSkipRoutes,
