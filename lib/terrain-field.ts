@@ -49,6 +49,16 @@ export type Depot = {
   name: string;
 };
 
+/** A town or petrol station diesel can be fetched from, snapped to the road graph. */
+export type FuelSource = {
+  kind: 'town' | 'fuel';
+  name: string;
+  lon: number;
+  lat: number;
+  node: number;
+  snappedM: number;
+};
+
 export type Candidate = {
   lon: number;
   lat: number;
@@ -108,6 +118,7 @@ export type TerrainMeta = {
   roads: { file: string; nodes: number; edges: number };
   places: Place[];
   depot: Depot;
+  fuelSources: FuelSource[];
   /** Best first; towerSite is candidates[0]. */
   candidates: Candidate[];
   sites: Site[];

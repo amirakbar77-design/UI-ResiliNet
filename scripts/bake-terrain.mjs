@@ -578,6 +578,39 @@ function buildGraph(ways, { elevation, width, height }, hand) {
   return { nodes, edges, roadNodes };
 }
 
+/**
+ * Where diesel comes from during an event: towns and OSM petrol stations,
+ * each snapped to the nearest road node. A site can be refuelled while one
+ * of these is within a crew's range by open road (lib/network.ts).
+ */
+async function bakeFuelSources(places, graph) {
+  const data = await overpass(
+    `[out:json][timeout:60];(node["amenity"="fuel"](${BBOX});way["amenity"="fuel"](${BBOX}););out center tags;`,
+    'fuel',
+  );
+  const sources = [];
+  for (const place of places) {
+    if (place.place === 'town') sources.push({ kind: 'town', name: place.name, lon: place.lon, lat: place.lat });
+  }
+  for (const element of data.elements) {
+    const lon = element.lon ?? element.center?.lon;
+    const lat = element.lat ?? element.center?.lat;
+    if (lon === undefined || lat === undefined) continue;
+    sources.push({ kind: 'fuel', name: element.tags?.brand ?? element.tags?.name ?? 'Petrol station', lon, lat });
+  }
+  const snapped = sources.map((source) => {
+    let best = null;
+    for (const index of graph.roadNodes) {
+      const [lon, lat] = graph.nodes[index];
+      const distance = Math.hypot((lon - source.lon) * metresPerDegLon(source.lat), (lat - source.lat) * METRES_PER_DEG_LAT);
+      if (!best || distance < best.distance) best = { distance, index };
+    }
+    return { ...source, lon: Number(source.lon.toFixed(5)), lat: Number(source.lat.toFixed(5)), node: best.index, snappedM: Math.round(best.distance) };
+  });
+  log('fuel sources', snapped.length, JSON.stringify(snapped.reduce((m, s) => ({ ...m, [s.kind]: (m[s.kind] ?? 0) + 1 }), {})));
+  return snapped;
+}
+
 /** The place node the truck starts from, snapped onto the road graph. */
 function pickDepot(places, graph) {
   const place =
@@ -960,7 +993,7 @@ const SITE_SNAP_METRES = 500;
 const OPERATORS = { 11: 'TM', 12: 'Maxis', 13: 'Celcom', 16: 'DiGi', 18: 'U Mobile', 19: 'Celcom', 152: 'Yes', 153: 'Webe', 158: 'Celcom' };
 const SITE_TOWN_METRES = 2500; // a site this close to Kuala Krai town gets a genset
 const SITE_DEFAULT_MAST_METRES = 45;
-const SITE_BATTERY_HOURS = 6; // illustrative; an operator's NOC knows the real runway
+const SITE_BATTERY_HOURS = 8; // illustrative (rural macro sites carry 4–8 h); an operator's NOC knows the real runway
 const SITE_FIBRE_METRES = 1000; // sites this close to the trunk road are fibre-fed
 const SITE_MICROWAVE_METRES = 15000;
 
@@ -1309,6 +1342,7 @@ async function main() {
   );
   const places = await bakePlaces();
   const depot = pickDepot(places, graph);
+  const fuelSources = await bakeFuelSources(places, graph);
   const candidates = pickCandidates(grid, hand, places, graph);
   const sites = buildSites(
     [...(await fetchOsmTowers()), ...(await fetchOpenCellIdSites())],
@@ -1341,6 +1375,7 @@ async function main() {
     },
     places,
     depot,
+    fuelSources,
     candidates,
     sites,
     towerSite,
@@ -1355,6 +1390,7 @@ async function main() {
       'Imagery: Sentinel-2 cloudless 2020 by EOX IT Services, CC BY 4.0 (ESA Copernicus)',
       'Roads, railway, settlements, residential areas and buildings: OpenStreetMap contributors, ODbL',
       'Network sites: OpenStreetMap masts and communication towers, ODbL; OpenCellID when a key is present, CC BY-SA 4.0; hand-placed seeds where the map is empty',
+      'Fuel sources: OpenStreetMap amenity=fuel, ODbL',
     ],
   };
   await writeFile(path.join(OUT, 'terrain.json'), JSON.stringify(metadata));

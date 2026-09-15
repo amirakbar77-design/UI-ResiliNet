@@ -82,6 +82,14 @@ export function edgeCutAt(edge: RoutableEdge, levelMetres: number) {
   return cutMask(edge, levelMetres).some(Boolean);
 }
 
+/** First forecast hour at which an edge is cut, or null if it stays open. */
+export function edgeClosingHour(edge: RoutableEdge, levels: number[]): number | null {
+  for (let h = 0; h < levels.length; h += 1) {
+    if (edgeCutAt(edge, levels[h]!)) return h;
+  }
+  return null;
+}
+
 export type RouteResult = {
   /** Kilometres from the source per reachable node index. */
   distance: Map<number, number>;

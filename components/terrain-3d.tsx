@@ -101,6 +101,8 @@ type SceneHandle = {
   finishRouteWave: () => void;
   /** Raises the mast and permanent coverage at the winning site and glides to it. */
   showWinner: (site: SiteAssessment | null) => void;
+  /** Pulses an outline on an existing site the officer could keep alive by refuelling. */
+  highlightKeepAlive: (siteId: string | null) => void;
   /** Previews another candidate's coverage without changing the winner. */
   previewSite: (site: SiteAssessment | null) => void;
   /** Removes the wave and returns the roads to flood colouring. */
@@ -805,6 +807,25 @@ function createScene(
   };
 
   // --- Winner and preview ------------------------------------------------
+  // Keep-alive option: an amber ring pulsing on the existing site to refuel.
+  const keepAliveGroup = new THREE.Group();
+  scene.add(keepAliveGroup);
+  let keepAliveRing: THREE.Mesh | null = null;
+  const keepAliveMaterial = new THREE.MeshBasicMaterial({
+    color: 0xfbbf24,
+    transparent: true,
+    opacity: 0.85,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+  });
+  const keepAliveGeometry = new THREE.RingGeometry(220 * SCENE_SCALE, 300 * SCENE_SCALE, 48);
+  const stepKeepAlive = (now: number) => {
+    if (!keepAliveRing) return;
+    const pulse = 0.5 + 0.5 * Math.sin(now / 320);
+    keepAliveRing.scale.setScalar(1 + 0.35 * pulse);
+    keepAliveMaterial.opacity = 0.35 + 0.5 * (1 - pulse);
+  };
+
   const winnerGroup = new THREE.Group();
   scene.add(winnerGroup);
   const previewGroup = new THREE.Group();
@@ -1680,6 +1701,7 @@ function createScene(
     }
     stepWave(now);
     stepSpawn(now);
+    stepKeepAlive(now);
     adaptResolution(dtMs, gesturing);
     updateMarkers();
     renderer.render(scene, camera);
@@ -1780,6 +1802,28 @@ function createScene(
       winnerGroup.add(winnerBeacon);
       winnerGroup.add(buildFan(site.candidate, site.mask));
 
+      // Backhaul: a dashed line from this mast to the surviving site it links to.
+      const parent = site.backhaulTo ? meta.sites.find((s) => s.id === site.backhaulTo) : undefined;
+      if (parent) {
+        const from = base.clone();
+        from.y += mastHeight;
+        const to = worldOf(parent.lon, parent.lat, parent.mastMetres);
+        const geometry = new THREE.BufferGeometry().setFromPoints([from, to]);
+        const line = new THREE.Line(
+          geometry,
+          new THREE.LineDashedMaterial({
+            color: 0x7dd3fc,
+            dashSize: 60 * SCENE_SCALE,
+            gapSize: 40 * SCENE_SCALE,
+            transparent: true,
+            opacity: 0.9,
+          }),
+        );
+        line.computeLineDistances();
+        line.renderOrder = 4;
+        winnerGroup.add(line);
+      }
+
       // Glide in from the current bearing, close enough to read the fan.
       const target = base.clone();
       const bearing = new THREE.Vector3()
@@ -1812,6 +1856,19 @@ function createScene(
         fromSun: sun.intensity,
         elapsed: 0,
       };
+    },
+    highlightKeepAlive(siteId) {
+      if (keepAliveRing) {
+        keepAliveGroup.remove(keepAliveRing);
+        keepAliveRing = null;
+      }
+      const site = siteId ? meta.sites.find((s) => s.id === siteId) : undefined;
+      if (!site) return;
+      keepAliveRing = new THREE.Mesh(keepAliveGeometry, keepAliveMaterial);
+      keepAliveRing.position.copy(worldOf(site.lon, site.lat, 4));
+      keepAliveRing.rotation.x = -Math.PI / 2;
+      keepAliveRing.renderOrder = 3;
+      keepAliveGroup.add(keepAliveRing);
     },
     previewSite(site) {
       disposeGroup(previewGroup);
@@ -1905,6 +1962,8 @@ function createScene(
       blockMaterial.dispose();
       ringGeometry.dispose();
       ringMaterial.dispose();
+      keepAliveGeometry.dispose();
+      keepAliveMaterial.dispose();
       sky.dispose();
       scene.background = null;
       renderer.dispose();
@@ -1956,6 +2015,7 @@ export function Terrain3D({
   onPreview,
   siteStates,
   onSiteTap,
+  keepAliveId,
   resetSignal,
 }: {
   layers: Record<LayerKey, boolean>;
@@ -1980,6 +2040,8 @@ export function Terrain3D({
   /** Existing-site status by site id; tapping a marker cycles its override. */
   siteStates: Record<string, SiteMarkerState>;
   onSiteTap: (id: string) => void;
+  /** Existing site the recommendation says to refuel, once the evaluation is done. */
+  keepAliveId: string | null;
   resetSignal: number;
 }) {
   // The baked assets are fetched from the client only: this component is
@@ -2083,6 +2145,10 @@ export function Terrain3D({
   useEffect(() => {
     if (routeRun?.skip) sceneRef.current?.finishRouteWave();
   }, [routeRun?.skip]);
+
+  useEffect(() => {
+    sceneRef.current?.highlightKeepAlive(keepAliveId);
+  }, [keepAliveId, terrain]);
 
   const winnerSite = routeSites?.find((site) => site.id === winnerId) ?? null;
   useEffect(() => {

@@ -16,17 +16,22 @@
  */
 
 import type { FloodCurve } from './forecast.ts';
-import { routeFrom } from './routing.ts';
+import { edgeCutAt } from './routing.ts';
 import type { Site, TerrainData } from './terrain-field.ts';
 import { viewshedMask, type ViewshedMask } from './viewshed.ts';
 
 // --- Constants (illustrative) ------------------------------------------------
-/** Hours a site runs on battery after the grid drops. Real: per-site runway from the operator's NOC. */
-export const BATTERY_HOURS = 6;
+/** Hours a site runs on battery after the grid drops (rural macro sites carry 4–8 h). Real: per-site runway from the operator's NOC. */
+export const BATTERY_HOURS = 8;
 /** Extra hours a genset buys — one tank, one refuelling before the road closes. Real: tank size and refuelling contract. */
 export const GENSET_HOURS = 12;
-/** Access is judged from the depot: a site is refuellable while the depot can still reach its road node. */
-export const ACCESS_FROM_DEPOT = true;
+/**
+ * Refuelling is local, not from the depot: a crew fetches diesel from the
+ * nearest town or petrol station (terrain.json fuelSources) and a site stays
+ * refuellable while one of those is within FUEL_RUN_KM of its access node by
+ * roads that are not cut. Real: the operator's fuel contracts and crew bases.
+ */
+export const FUEL_RUN_KM = 25;
 
 export type SiteStatus = 'up' | 'battery' | 'down';
 export type FailureCause = 'inundation' | 'power' | 'backhaul' | 'manual';
@@ -79,17 +84,53 @@ export function assessNetwork(
   const { meta, graph } = terrain;
   const hours = curve.levels.length;
 
-  // Access from the depot per hour: one Dijkstra per forecast hour is cheap
-  // on a ~1,300-edge graph and answers "can a fuel truck still get there?".
-  const reachableByHour: Set<number>[] = [];
+  // Refuelling access per hour: a multi-source Dijkstra from every fuel
+  // source over the roads that are not cut, capped at FUEL_RUN_KM, gives the
+  // set of sites a crew can still reach with diesel.
+  const sources = meta.fuelSources.map((s) => s.node);
+  const refuellableByHour: Set<string>[] = [];
   for (let h = 0; h < hours; h += 1) {
-    const { distance } = routeFrom(graph.edges, meta.depot.node, curve.levels[h]!);
-    reachableByHour.push(new Set(distance.keys()));
+    const level = curve.levels[h]!;
+    const adjacency = new Map<number, { to: number; km: number }[]>();
+    for (const edge of graph.edges) {
+      if (edge.klass === 'rail' || edgeCutAt(edge, level)) continue;
+      for (const [from, to] of [[edge.a, edge.b], [edge.b, edge.a]] as const) {
+        let list = adjacency.get(from);
+        if (!list) {
+          list = [];
+          adjacency.set(from, list);
+        }
+        list.push({ to, km: edge.km });
+      }
+    }
+    const distance = new Map<number, number>();
+    const open: { node: number; km: number }[] = [];
+    for (const node of sources) {
+      distance.set(node, 0);
+      open.push({ node, km: 0 });
+    }
+    while (open.length > 0) {
+      open.sort((x, y) => x.km - y.km);
+      const { node, km } = open.shift()!;
+      if (km > (distance.get(node) ?? Infinity)) continue;
+      for (const next of adjacency.get(node) ?? []) {
+        const total = km + next.km;
+        if (total > FUEL_RUN_KM) continue;
+        if (total < (distance.get(next.to) ?? Infinity)) {
+          distance.set(next.to, total);
+          open.push({ node: next.to, km: total });
+        }
+      }
+    }
+    const refuellable = new Set<string>();
+    for (const site of meta.sites) {
+      if (distance.has(site.accessNode)) refuellable.add(site.id);
+    }
+    refuellableByHour.push(refuellable);
   }
   const accessCutHour = (site: Site) => {
-    if (!ACCESS_FROM_DEPOT) return null;
     for (let h = 0; h < hours; h += 1) {
-      if (!reachableByHour[h]!.has(site.accessNode)) return h;
+      if (!refuellableByHour[h]!.has(site.id)) return h;
     }
     return null;
   };

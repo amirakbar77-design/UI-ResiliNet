@@ -55,6 +55,7 @@ import {
   type SiteStatus,
   siteViewsheds,
 } from '@/lib/network';
+import { keepAliveOptions, type Plan, recommendPlans, type Recommendation } from '@/lib/recommend';
 import { evaluateRoutes, type RouteEvaluation } from '@/lib/routing';
 import { assessSites, type SiteAssessment } from '@/lib/sites';
 import { clamp, type TerrainData, terrainResource } from '@/lib/terrain-field';
@@ -415,6 +416,7 @@ function TerrainStage({
   onPreview,
   siteStates,
   onSiteTap,
+  keepAliveId,
   resetSignal,
 }: {
   layers: Record<LayerKey, boolean>;
@@ -433,6 +435,7 @@ function TerrainStage({
   onPreview: (id: string) => void;
   siteStates: Record<string, SiteMarkerState>;
   onSiteTap: (id: string) => void;
+  keepAliveId: string | null;
   resetSignal: number;
 }) {
   return (
@@ -458,6 +461,7 @@ function TerrainStage({
           onPreview={onPreview}
           siteStates={siteStates}
           onSiteTap={onSiteTap}
+          keepAliveId={keepAliveId}
           resetSignal={resetSignal}
         />
       </Suspense>
@@ -1044,6 +1048,119 @@ const waveLegend = [
   ['bg-slate-500', 'Unreachable now'],
 ] as const;
 
+function planTitle(plan: Plan, now: number | null) {
+  const keep = plan.keep
+    ? `${plan.keep.method === 'generator-run' ? 'Generator run to' : 'Refuel'} ${plan.keep.site.site.name} by ${clockLabel(now, plan.keep.by)}`
+    : null;
+  const tower = plan.portable ? `tower at ${plan.portable.site.candidate.name}` : null;
+  if (keep && tower) return `${keep}, then ${tower}`;
+  return keep ?? `Portable ${tower}`;
+}
+
+function RecommendationCard({
+  route,
+  plannedLevel,
+  plannedLabel,
+  plannedClock,
+  now,
+  siteNames,
+}: {
+  route: RouteState;
+  plannedLevel: number;
+  plannedLabel: string;
+  plannedClock: string;
+  now: number | null;
+  siteNames: Record<string, string>;
+}) {
+  const { best, alternatives } = route.recommendation;
+  if (!best) return null;
+  const tower = best.portable;
+  const keep = best.keep;
+  const tone = tower ? 'emerald' : 'amber';
+  const margin = tower ? tower.site.candidate.handDm / 10 - plannedLevel : 0;
+  return (
+    <div
+      className={`mt-3 rounded-xl border p-3.5 ${tone === 'emerald' ? 'border-emerald-300/30 bg-emerald-300/10' : 'border-amber-300/30 bg-amber-300/10'}`}
+    >
+      <p
+        className={`text-[11px] font-semibold tracking-[0.12em] uppercase ${tone === 'emerald' ? 'text-emerald-300' : 'text-amber-300'}`}
+      >
+        Recommendation{keep && tower ? ' · two moves' : keep ? ' · keep a site alive' : ' · portable tower'}
+      </p>
+      <h3 className="mt-0.5 text-base font-semibold leading-snug text-white">{planTitle(best, now)}</h3>
+      <p
+        className={`mt-2 text-[28px] font-semibold leading-none tracking-[-0.03em] tabular-nums ${tone === 'emerald' ? 'text-emerald-300' : 'text-amber-300'}`}
+      >
+        {best.homesOnSignal.toLocaleString()}
+        <span className={`ml-1.5 text-sm font-medium ${tone === 'emerald' ? 'text-emerald-100/80' : 'text-amber-100/80'}`}>
+          homes kept on signal
+        </span>
+      </p>
+      <p className="mt-1 text-xs text-slate-300 tabular-nums">
+        of {route.withoutSignal.toLocaleString()} without signal at {plannedClock}
+      </p>
+      <ol className="mt-3 space-y-2 text-xs text-slate-200 tabular-nums">
+        {keep && (
+          <li className="flex gap-2">
+            <span className="mt-0.5 grid size-4 shrink-0 place-items-center rounded-full bg-amber-400/20 text-[10px] font-bold text-amber-200">
+              1
+            </span>
+            <span>
+              {keep.method === 'generator-run' ? (
+                <>
+                  <span className="font-semibold text-white">Generator run from the depot</span> to {keep.site.site.name}:{' '}
+                  {keep.routeKm} km, {keep.travelHours} h drive — the road closes at {clockLabel(now, keep.by)}.
+                </>
+              ) : (
+                <>
+                  <span className="font-semibold text-white">Local crew refuels</span> {keep.site.site.name} before{' '}
+                  {clockLabel(now, keep.by)}, when its road closes.
+                </>
+              )}{' '}
+              Keeps {keep.homesKept.toLocaleString()} homes.
+            </span>
+          </li>
+        )}
+        {tower && (
+          <li className="flex gap-2">
+            <span className="mt-0.5 grid size-4 shrink-0 place-items-center rounded-full bg-emerald-400/20 text-[10px] font-bold text-emerald-200">
+              {keep ? 2 : 1}
+            </span>
+            <span>
+              <span className="font-semibold text-white">Portable tower at {tower.site.candidate.name}</span>: reconnects{' '}
+              {tower.homesReconnected.toLocaleString()} {keep ? 'more ' : ''}homes · microwave to{' '}
+              {siteNames[tower.backhaulTo] ?? tower.backhaulTo}, {tower.backhaulKm} km line of sight ·{' '}
+              {tower.site.candidate.handDm >= 254 ? 'well above' : `+${margin.toFixed(1)} m above`} the planned flood ·{' '}
+              {tower.site.routeKm.toFixed(1)} km by road
+              {tower.site.candidate.nearestRoadM > 0 ? `, then ${tower.site.candidate.nearestRoadM} m off-road` : ''}.
+            </span>
+          </li>
+        )}
+      </ol>
+      <p className="mt-3 inline-flex items-center rounded-full border border-sky-300/25 bg-slate-950/60 px-2.5 py-1 text-[11px] text-slate-200 tabular-nums">
+        Planning for {plannedLabel}
+      </p>
+      {alternatives.length > 0 && (
+        <div className="mt-3 text-[11px] text-slate-400">
+          <span className="font-semibold text-slate-300">Alternatives</span>
+          <ul className="mt-1 space-y-1">
+            {alternatives.map((plan, i) => (
+              <li key={i} className="tabular-nums">
+                {planTitle(plan, now)} — {plan.homesOnSignal.toLocaleString()} homes
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      <p className="mt-2 text-[11px] text-slate-500">
+        Plans are ranked by homes on signal at the planned hour; a tower counts only what it adds beyond a
+        kept site, and needs a microwave link to a site that is alive in the plan. Tap another site on the
+        map to preview its coverage.
+      </p>
+    </div>
+  );
+}
+
 function RouteControls({
   route,
   ready,
@@ -1051,6 +1168,8 @@ function RouteControls({
   plannedLabel,
   plannedClock,
   withoutSignal,
+  now,
+  siteNames,
   onStart,
   onSkip,
 }: {
@@ -1061,16 +1180,14 @@ function RouteControls({
   plannedClock: string;
   /** Homes with signal now and none at the planned hour; null until known. */
   withoutSignal: number | null;
+  now: number | null;
+  siteNames: Record<string, string>;
   onStart: () => void;
   onSkip: () => void;
 }) {
   const running = route?.status === 'running';
   const done = route?.status === 'done';
   const sitesRunning = done && !route.sitesDone;
-  const winner = route?.sitesDone
-    ? (route.sites.find((site) => site.id === route.winnerId) ?? null)
-    : null;
-  const margin = winner ? winner.candidate.handDm / 10 - plannedLevel : 0;
   return (
     <section className="mt-4">
       <Button
@@ -1123,7 +1240,7 @@ function RouteControls({
           </ul>
         </div>
       )}
-      {done && !winner && (
+      {done && !route.sitesDone && (
         <div className="mt-3 rounded-xl border border-emerald-300/20 bg-emerald-300/8 p-3.5">
           <p className="text-[11px] font-semibold tracking-[0.1em] text-emerald-200/75 uppercase">
             Reachable sites
@@ -1141,52 +1258,15 @@ function RouteControls({
           </p>
         </div>
       )}
-      {winner && route && (
-        <div className="mt-3 rounded-xl border border-emerald-300/30 bg-emerald-300/10 p-3.5">
-          <p className="text-[11px] font-semibold tracking-[0.12em] text-emerald-300 uppercase">
-            Best site
-          </p>
-          <h3 className="mt-0.5 text-lg font-semibold text-white">
-            {winner.candidate.name}
-          </h3>
-          <p className="mt-2 text-[28px] font-semibold leading-none tracking-[-0.03em] text-emerald-300 tabular-nums">
-            {winner.homesReconnected.toLocaleString()}
-            <span className="ml-1.5 text-sm font-medium text-emerald-100/80">
-              homes reconnected
-            </span>
-          </p>
-          <p className="mt-1 text-xs text-emerald-100/70 tabular-nums">
-            of {route.withoutSignal.toLocaleString()} without signal at {plannedClock}
-          </p>
-          <ul className="mt-3 space-y-1.5 text-xs text-slate-200 tabular-nums">
-            <li>
-              {winner.candidate.handDm >= 254
-                ? 'Well above'
-                : `+${margin.toFixed(1)} m above`}{' '}
-              the planned flood
-            </li>
-            <li>
-              {winner.routeKm.toFixed(1)} km by road from the depot
-              {winner.candidate.nearestRoadM > 0 && (
-                <span className="text-slate-400">
-                  {' '}· then {winner.candidate.nearestRoadM} m off-road
-                </span>
-              )}
-            </li>
-            <li>
-              {winner.candidate.elevation} m elevation · line of sight over{' '}
-              {winner.homesCovered.toLocaleString()} homes in all
-            </li>
-          </ul>
-          <p className="mt-3 inline-flex items-center rounded-full border border-sky-300/25 bg-slate-950/60 px-2.5 py-1 text-[11px] text-slate-200 tabular-nums">
-            Planning for {plannedLabel}
-          </p>
-          <p className="mt-3 text-[11px] text-slate-500">
-            Highest count of homes without signal among {route.sites.length}{' '}
-            reachable sites; ties go to the shorter road. Tap another site on
-            the map to preview its coverage.
-          </p>
-        </div>
+      {route?.sitesDone && route.recommendation.best && (
+        <RecommendationCard
+          route={route}
+          plannedLevel={plannedLevel}
+          plannedLabel={plannedLabel}
+          plannedClock={plannedClock}
+          now={now}
+          siteNames={siteNames}
+        />
       )}
       {!ready && (
         <p className="mt-2 text-[11px] text-slate-500">Loading road network…</p>
@@ -1218,6 +1298,7 @@ function StageContent({
   plannedClock,
   withoutSignal,
   network,
+  siteNames,
   onStartRoutes,
   onSkipRoutes,
   onNext,
@@ -1276,6 +1357,8 @@ function StageContent({
             plannedLabel={plannedLabel}
             plannedClock={plannedClock}
             withoutSignal={withoutSignal}
+            now={now}
+            siteNames={siteNames}
             onStart={onStartRoutes}
             onSkip={onSkipRoutes}
           />
@@ -1306,22 +1389,9 @@ type RouteState = {
   withoutSignal: number;
   /** Existing-site failure hours and the planned hour, for the scene's fans. */
   network: RouteRun['network'];
+  /** Keep-alive vs portable, decided at Start and revealed with the winner. */
+  recommendation: Recommendation;
 };
-
-/** Highest homes reconnected wins; a tie goes to the shorter road. */
-function pickWinner(sites: SiteAssessment[]) {
-  let best: SiteAssessment | null = null;
-  for (const site of sites) {
-    if (
-      !best ||
-      site.homesReconnected > best.homesReconnected ||
-      (site.homesReconnected === best.homesReconnected && site.routeKm < best.routeKm)
-    ) {
-      best = site;
-    }
-  }
-  return best?.id ?? null;
-}
 
 type StageProps = {
   stage: Stage;
@@ -1336,6 +1406,7 @@ type StageProps = {
   plannedClock: string;
   withoutSignal: number | null;
   network: NetworkAssessment | null;
+  siteNames: Record<string, string>;
   onStartRoutes: () => void;
   onSkipRoutes: () => void;
   onNext: () => void;
@@ -1571,9 +1642,14 @@ export function ResilinetDashboard() {
   };
   const onNext = () => changeStage(stage === 'now' ? 'forecast' : 'site');
 
+  const siteNames = useMemo(() => {
+    const names: Record<string, string> = {};
+    for (const s of terrain?.meta.sites ?? []) names[s.id] = s.name;
+    return names;
+  }, [terrain]);
   const routesReady = terrain !== null && curve !== null && hole !== null;
   const onStartRoutes = () => {
-    if (!terrain || !curve || !hole || !network) return;
+    if (!terrain || !curve || !hole || !network || !siteMasks) return;
     const evaluation = evaluateRoutes(
       terrain.graph,
       terrain.meta.depot.node,
@@ -1581,15 +1657,48 @@ export function ResilinetDashboard() {
       curve.levels,
       curve.peakHour(),
     );
-    const sites = assessSites(terrain, evaluation.distanceByNode, hole.mask);
+    const keepAlive = keepAliveOptions(terrain, network, siteMasks, hole, forecastHour, {
+      level: gaugeToHandLevel(gauge),
+      levels: curve.levels,
+    });
+    // A candidate is worth showing only if some plan could give it a link:
+    // a survivor at the planned hour, or a site a plan could keep alive.
+    const usable = new Set([...network.liveAt(forecastHour), ...keepAlive.map((o) => o.site.id)]);
+    const sites = assessSites(terrain, evaluation.distanceByNode, hole.mask, terrain.meta.sites).filter(
+      (site) => site.backhaulOptions.some((o) => usable.has(o.siteId)),
+    );
+    const recommendation = recommendPlans(terrain, network, siteMasks, hole, forecastHour, sites, keepAlive);
+    // The map's winner shows the link the best plan actually uses.
+    const bestTower = recommendation.best?.portable ?? null;
+    const sitesForMap = bestTower
+      ? sites.map((s) =>
+          s.id === bestTower.site.id
+            ? { ...s, backhaulTo: bestTower.backhaulTo, backhaulKm: bestTower.backhaulKm }
+            : s,
+        )
+      : sites;
     // For checking against the labels on the map.
     console.log(`without signal at +${forecastHour} h: ${hole.count} of ${hole.coveredNow} homes covered now`);
     console.table(
       sites.map((site) => ({
         candidate: site.candidate.name,
         'route km': Number(site.routeKm.toFixed(1)),
-        'homes reconnected': site.homesReconnected,
+        'in hole': site.homesReconnected,
         'homes covered': site.homesCovered,
+        links: site.backhaulOptions
+          .filter((o) => usable.has(o.siteId))
+          .slice(0, 3)
+          .map((o) => `${siteNames[o.siteId]} ${o.km} km`)
+          .join(' · '),
+      })),
+    );
+    console.table(
+      keepAlive.map((o) => ({
+        site: o.site.site.name,
+        method: o.method,
+        by: `+${o.by} h`,
+        route: o.routeKm === null ? '—' : `${o.routeKm} km`,
+        'homes kept': o.homesKept,
       })),
     );
     const failures: Record<string, number | null> = {};
@@ -1601,13 +1710,15 @@ export function ResilinetDashboard() {
       skip: false,
       reachableKm: 0,
       cuts: 0,
-      sites,
+      sites: sitesForMap,
       spawned: [],
       sitesDone: false,
-      winnerId: pickWinner(sites),
+      // The map's winner is the tower in the best plan, if the plan has one.
+      winnerId: recommendation.best?.portable?.site.id ?? null,
       previewId: null,
       withoutSignal: hole.count,
       network: { failures, plannedHour: forecastHour },
+      recommendation,
     }));
   };
   const onSkipRoutes = () =>
@@ -1665,6 +1776,10 @@ export function ResilinetDashboard() {
     [route],
   );
   const spawnedIds = route?.spawned ?? [];
+  const keepAliveId = useMemo(
+    () => (route?.sitesDone ? (route.recommendation.best?.keep?.site.id ?? null) : null),
+    [route],
+  );
 
   const stageProps: StageProps = {
     stage,
@@ -1678,6 +1793,7 @@ export function ResilinetDashboard() {
     plannedClock,
     withoutSignal: hole?.count ?? null,
     network,
+    siteNames,
     onStartRoutes,
     onSkipRoutes,
     onNext,
@@ -1702,6 +1818,7 @@ export function ResilinetDashboard() {
         onPreview={onPreview}
         siteStates={siteStates}
         onSiteTap={onSiteTap}
+        keepAliveId={keepAliveId}
         resetSignal={resetSignal}
       />
       <TopBar stage={stage} setStage={changeStage} />
