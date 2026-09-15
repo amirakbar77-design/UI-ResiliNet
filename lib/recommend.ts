@@ -1,35 +1,52 @@
 /**
- * The Site stage's recommendation as a plan: keep an existing site alive,
- * deploy the portable tower, or both — the tower linked by microwave to a
- * site that is live in that plan. Whichever keeps the most homes on signal
- * at the planned hour wins. A system that can say "refuel, don't deploy" is
- * the one an operator believes. Every count is people (WorldPop).
+ * The Site stage's recommendation, in two tiers.
+ *
+ * Vocabulary, used the same way on the card and in the README: a "site" is
+ * one of the existing masts in terrain.json; the "portable tower" is the
+ * cell-on-wheels driven out from the depot; the "convoy" is the one genset
+ * trailer from the depot; a "top-up" is a crew refuelling a site's generator.
+ *
+ * Tier 1, the baseline: every site a local crew can still reach with diesel
+ * before its access road closes is assumed topped up. That is routine work
+ * done everywhere at once, so it is never ranked against anything; it just
+ * shrinks the hole. Tier 2, the scarce moves: where the one convoy goes and
+ * where the one portable tower goes, ranked over the residual hole by people
+ * on signal at the planned hour. Every count is people (WorldPop).
  */
 
 import type { CoverageHole, NetworkAssessment, NetworkSiteState } from './network.ts';
-import { coverageAt } from './network.ts';
+import { coverageAt, coverageHole } from './network.ts';
 import { populatedCells } from './population.ts';
 import { routeFrom } from './routing.ts';
 import type { SiteAssessment } from './sites.ts';
 import type { TerrainData } from './terrain-field.ts';
 import type { ViewshedMask } from './viewshed.ts';
 
-/** A generator-and-fuel convoy's speed on flood-day roads. Illustrative. */
+/** The convoy's speed on flood-day roads. Illustrative. */
 export const CONVOY_KMH = 40;
-/** Keep-alive options considered when building combined plans (strongest first). */
-const PLAN_KEEP_CANDIDATES = 6;
+/** Convoy options considered when building combined plans (strongest first). */
+const PLAN_CONVOY_CANDIDATES = 6;
 
-export type KeepAliveOption = {
-  kind: 'keep-alive';
+/** Tier 1: sites local crews top up before their access closes. */
+export type Baseline = {
+  sites: NetworkSiteState[];
+  /** Earliest access-cut hour among them: every top-up must be done by then. */
+  by: number | null;
+  /** People in the hole the union of their coverage keeps on signal. */
+  peopleKept: number;
+  /** People in the hole before the top-ups. */
+  holeBefore: number;
+};
+
+/** Tier 2: the one genset trailer from the depot. */
+export type ConvoyOption = {
+  kind: 'convoy';
   site: NetworkSiteState;
-  /** local-refuel: a crew from a nearby station; generator-run: a convoy from the depot. */
-  method: 'local-refuel' | 'generator-run';
-  /** Latest hour the fuel can still get there — the road closes after this. */
+  /** Latest arrival hour at which the roads on the way are still open. */
   by: number;
-  /** Road km and drive time for a generator run; null for a local refuel. */
-  routeKm: number | null;
-  travelHours: number | null;
-  /** People in the hole that this site alone would keep on signal. */
+  routeKm: number;
+  travelHours: number;
+  /** People in the residual hole this site alone would keep on signal. */
   peopleKept: number;
 };
 
@@ -44,16 +61,18 @@ export type PortableStep = {
 };
 
 export type Plan = {
-  keep: KeepAliveOption | null;
+  convoy: ConvoyOption | null;
   portable: PortableStep | null;
-  /** People kept or brought back on signal at the planned hour. */
+  /** People kept or brought back on signal at the planned hour, beyond the baseline. */
   peopleOnSignal: number;
 };
 
 export type Recommendation = {
+  /** Null when no convoy arrives in time and no candidate has a link. */
   best: Plan | null;
   alternatives: Plan[];
-  keepAlive: KeepAliveOption[];
+  baseline: Baseline;
+  convoys: ConvoyOption[];
 };
 
 export type RoutingContext = {
@@ -63,28 +82,64 @@ export type RoutingContext = {
   levels: number[];
 };
 
+/** A site the plan loses to power that a local crew can still reach before its access closes. */
+function canTopUp(state: NetworkSiteState, plannedHour: number) {
+  return (
+    state.failureCause === 'power' &&
+    state.failureHour !== null &&
+    state.failureHour <= plannedHour &&
+    state.accessCutHour !== null &&
+    state.accessCutHour > 0
+  );
+}
+
 /**
- * Keep-alive options: sites the plan loses to power. Two ways to keep one:
- * a local crew refuels it while a station is still within range (the model's
- * access rule), or a generator run from the depot reaches it before the
- * first road on the way closes.
+ * Tier 1. The baseline top-ups and the residual hole they leave. A topped-up
+ * site stays live through the planned hour; sites hanging off it by backhaul
+ * are not revived (a stated simplification).
  */
-export function keepAliveOptions(
+export function baselineTopUps(
+  terrain: TerrainData,
+  network: NetworkAssessment,
+  masks: Map<string, ViewshedMask>,
+  plannedHour: number,
+): { baseline: Baseline; hole: CoverageHole } {
+  const before = coverageHole(terrain, masks, network, plannedHour);
+  const sites = network.sites.filter((state) => canTopUp(state, plannedHour));
+  const hole = coverageHole(
+    terrain,
+    masks,
+    network,
+    plannedHour,
+    sites.map((state) => state.id),
+  );
+  const by = sites.length > 0 ? Math.min(...sites.map((state) => state.accessCutHour!)) : null;
+  return {
+    baseline: { sites, by, peopleKept: before.count - hole.count, holeBefore: before.count },
+    hole,
+  };
+}
+
+/**
+ * Tier 2a. Convoy options: sites the plan loses to power that no local crew
+ * can reach, but the convoy can. A convoy must drive on roads that are still
+ * open when it passes, so it is routed over the roads open at its arrival
+ * hour rather than the shortest path now — a shortcut that floods within the
+ * hour is no shortcut. The latest arrival hour with the drive time inside
+ * that window is the "by".
+ */
+export function convoyOptions(
   terrain: TerrainData,
   network: NetworkAssessment,
   masks: Map<string, ViewshedMask>,
   hole: CoverageHole,
   plannedHour: number,
+  baseline: Baseline,
   routing: RoutingContext,
-): KeepAliveOption[] {
+): ConvoyOption[] {
   const { graph, meta } = terrain;
   const cells = populatedCells(terrain);
-  const survivors = coverageAt(masks, network.liveAt(plannedHour));
-  // A convoy must drive on roads that are still open when it passes, so it is
-  // routed over the roads open at its arrival hour rather than the shortest
-  // path now — a shortcut that floods within the hour is no shortcut. For each
-  // site, the latest arrival hour at which it is still reachable with the
-  // drive time inside that window is the "by".
+  const toppedUp = new Set(baseline.sites.map((state) => state.id));
   const routeAtHour: Map<number, number>[] = [];
   for (let h = 0; h < routing.levels.length; h += 1) {
     routeAtHour.push(routeFrom(graph.edges, meta.depot.node, routing.levels[h]!).distance);
@@ -102,34 +157,25 @@ export function keepAliveOptions(
     if (!mask) return 0;
     let kept = 0;
     for (let i = 0; i < cells.count; i += 1) {
-      if (!hole.mask[i]) continue;
-      const lon = cells.lon[i]!;
-      const lat = cells.lat[i]!;
-      if (mask.covers(lon, lat) && !survivors.covers(lon, lat)) kept += cells.people[i]!;
+      if (hole.mask[i] && mask.covers(cells.lon[i]!, cells.lat[i]!)) kept += cells.people[i]!;
     }
     return Math.round(kept);
   };
 
-  const options: KeepAliveOption[] = [];
+  const options: ConvoyOption[] = [];
   for (const state of network.sites) {
     if (state.failureCause !== 'power' || state.failureHour === null) continue;
-    if (state.failureHour > plannedHour) continue;
-    const peopleKept = peopleKeptBy(state.id);
-    if (state.accessCutHour !== null && state.accessCutHour > 0) {
-      options.push({ kind: 'keep-alive', site: state, method: 'local-refuel', by: state.accessCutHour, routeKm: null, travelHours: null, peopleKept });
-      continue;
-    }
+    if (state.failureHour > plannedHour || toppedUp.has(state.id)) continue;
     const window = convoyWindow(state.site.accessNode);
     if (!window) continue; // no road stays open long enough for the drive
     // A generator on site with fuel for days keeps it up through the horizon.
     options.push({
-      kind: 'keep-alive',
+      kind: 'convoy',
       site: state,
-      method: 'generator-run',
       by: window.by,
       routeKm: Number(window.km.toFixed(1)),
       travelHours: Number((window.km / CONVOY_KMH).toFixed(1)),
-      peopleKept,
+      peopleKept: peopleKeptBy(state.id),
     });
   }
   options.sort((a, b) => b.peopleKept - a.peopleKept || a.by - b.by);
@@ -137,9 +183,10 @@ export function keepAliveOptions(
 }
 
 /**
- * Builds and ranks plans: tower only, refuel only, and refuel + tower with the
- * tower linked to the kept site. The hole shrinks by the kept site's coverage,
- * so the tower's value in a combined plan is what it adds beyond that.
+ * Tier 2b. Builds and ranks the scarce moves over the residual hole: portable
+ * tower only, convoy only, and convoy + portable tower with the mast linked
+ * to the convoy's site. The hole shrinks by the convoy site's coverage, so
+ * the tower's value in a combined plan is what it adds beyond that.
  */
 export function recommendPlans(
   terrain: TerrainData,
@@ -148,10 +195,12 @@ export function recommendPlans(
   hole: CoverageHole,
   plannedHour: number,
   sites: SiteAssessment[],
-  keepAlive: KeepAliveOption[],
+  convoys: ConvoyOption[],
+  baseline: Baseline,
 ): Recommendation {
   const cells = populatedCells(terrain);
-  const survivorIds = new Set(network.liveAt(plannedHour));
+  // Live in every plan: survivors and the topped-up sites.
+  const liveIds = new Set([...network.liveAt(plannedHour), ...baseline.sites.map((s) => s.id)]);
 
   const holeMaskGiven = (extraLive: string | null) => {
     if (!extraLive) return hole.mask;
@@ -169,10 +218,10 @@ export function recommendPlans(
     }
     return Math.round(n);
   };
-  const bestTower = (liveIds: Set<string>, mask: Uint8Array): PortableStep | null => {
+  const bestTower = (live: Set<string>, mask: Uint8Array): PortableStep | null => {
     let best: PortableStep | null = null;
     for (const site of sites) {
-      const link = site.backhaulOptions.find((o) => liveIds.has(o.siteId));
+      const link = site.backhaulOptions.find((o) => live.has(o.siteId));
       if (!link) continue;
       const peopleReconnected = reconnectedIn(site, mask);
       if (
@@ -187,34 +236,35 @@ export function recommendPlans(
   };
 
   const plans: Plan[] = [];
-  const towerOnly = bestTower(survivorIds, hole.mask);
-  if (towerOnly) plans.push({ keep: null, portable: towerOnly, peopleOnSignal: towerOnly.peopleReconnected });
-  for (const keep of keepAlive.slice(0, PLAN_KEEP_CANDIDATES)) {
-    plans.push({ keep, portable: null, peopleOnSignal: keep.peopleKept });
-    const liveIds = new Set(survivorIds);
-    liveIds.add(keep.site.id);
-    const mask = holeMaskGiven(keep.site.id);
-    const tower = bestTower(liveIds, mask);
+  const towerOnly = bestTower(liveIds, hole.mask);
+  if (towerOnly && towerOnly.peopleReconnected > 0) {
+    plans.push({ convoy: null, portable: towerOnly, peopleOnSignal: towerOnly.peopleReconnected });
+  }
+  for (const convoy of convoys.slice(0, PLAN_CONVOY_CANDIDATES)) {
+    plans.push({ convoy, portable: null, peopleOnSignal: convoy.peopleKept });
+    const live = new Set(liveIds);
+    live.add(convoy.site.id);
+    const tower = bestTower(live, holeMaskGiven(convoy.site.id));
     if (tower && tower.peopleReconnected > 0) {
-      plans.push({ keep, portable: tower, peopleOnSignal: keep.peopleKept + tower.peopleReconnected });
+      plans.push({ convoy, portable: tower, peopleOnSignal: convoy.peopleKept + tower.peopleReconnected });
     }
   }
-  const steps = (p: Plan) => (p.keep ? 1 : 0) + (p.portable ? 1 : 0);
+  const moves = (p: Plan) => (p.convoy ? 1 : 0) + (p.portable ? 1 : 0);
   plans.sort(
     (a, b) =>
       b.peopleOnSignal - a.peopleOnSignal ||
-      steps(a) - steps(b) ||
+      moves(a) - moves(b) ||
       (a.portable?.site.routeKm ?? 0) - (b.portable?.site.routeKm ?? 0),
   );
   const best = plans[0] ?? null;
   // Alternatives: the next-best plans of a different shape, at most two.
   const alternatives: Plan[] = [];
+  const shape = (p: Plan) => `${p.convoy?.site.id ?? '-'}|${p.portable?.site.id ?? '-'}`;
   for (const plan of plans.slice(1)) {
     if (alternatives.length >= 2) break;
-    const shape = (p: Plan) => `${p.keep?.site.id ?? '-'}|${p.portable?.site.id ?? '-'}`;
     if (best && shape(plan) === shape(best)) continue;
     if (alternatives.some((a) => shape(a) === shape(plan))) continue;
     alternatives.push(plan);
   }
-  return { best, alternatives, keepAlive };
+  return { best, alternatives, baseline, convoys };
 }

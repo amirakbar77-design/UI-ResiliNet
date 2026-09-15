@@ -100,8 +100,8 @@ type SceneHandle = {
   finishRouteWave: () => void;
   /** Raises the mast and permanent coverage at the winning site and glides to it. */
   showWinner: (site: SiteAssessment | null) => void;
-  /** Pulses an outline on an existing site the officer could keep alive by refuelling. */
-  highlightKeepAlive: (siteId: string | null) => void;
+  /** Pulses an outline on the site the plan sends the convoy to. */
+  highlightConvoy: (siteId: string | null) => void;
   /** Previews another candidate's coverage without changing the winner. */
   previewSite: (site: SiteAssessment | null) => void;
   /** Removes the wave and returns the roads to flood colouring. */
@@ -795,23 +795,23 @@ function createScene(
   };
 
   // --- Winner and preview ------------------------------------------------
-  // Keep-alive option: an amber ring pulsing on the existing site to refuel.
-  const keepAliveGroup = new THREE.Group();
-  scene.add(keepAliveGroup);
-  let keepAliveRing: THREE.Mesh | null = null;
-  const keepAliveMaterial = new THREE.MeshBasicMaterial({
+  // Convoy: an amber ring pulsing on the site the plan sends the genset trailer to.
+  const convoyGroup = new THREE.Group();
+  scene.add(convoyGroup);
+  let convoyRing: THREE.Mesh | null = null;
+  const convoyMaterial = new THREE.MeshBasicMaterial({
     color: 0xfbbf24,
     transparent: true,
     opacity: 0.85,
     depthWrite: false,
     side: THREE.DoubleSide,
   });
-  const keepAliveGeometry = new THREE.RingGeometry(220 * SCENE_SCALE, 300 * SCENE_SCALE, 48);
-  const stepKeepAlive = (now: number) => {
-    if (!keepAliveRing) return;
+  const convoyGeometry = new THREE.RingGeometry(220 * SCENE_SCALE, 300 * SCENE_SCALE, 48);
+  const stepConvoyRing = (now: number) => {
+    if (!convoyRing) return;
     const pulse = 0.5 + 0.5 * Math.sin(now / 320);
-    keepAliveRing.scale.setScalar(1 + 0.35 * pulse);
-    keepAliveMaterial.opacity = 0.35 + 0.5 * (1 - pulse);
+    convoyRing.scale.setScalar(1 + 0.35 * pulse);
+    convoyMaterial.opacity = 0.35 + 0.5 * (1 - pulse);
   };
 
   const winnerGroup = new THREE.Group();
@@ -1689,7 +1689,7 @@ function createScene(
     }
     stepWave(now);
     stepSpawn(now);
-    stepKeepAlive(now);
+    stepConvoyRing(now);
     adaptResolution(dtMs, gesturing);
     updateMarkers();
     renderer.render(scene, camera);
@@ -1845,18 +1845,18 @@ function createScene(
         elapsed: 0,
       };
     },
-    highlightKeepAlive(siteId) {
-      if (keepAliveRing) {
-        keepAliveGroup.remove(keepAliveRing);
-        keepAliveRing = null;
+    highlightConvoy(siteId) {
+      if (convoyRing) {
+        convoyGroup.remove(convoyRing);
+        convoyRing = null;
       }
       const site = siteId ? meta.sites.find((s) => s.id === siteId) : undefined;
       if (!site) return;
-      keepAliveRing = new THREE.Mesh(keepAliveGeometry, keepAliveMaterial);
-      keepAliveRing.position.copy(worldOf(site.lon, site.lat, 4));
-      keepAliveRing.rotation.x = -Math.PI / 2;
-      keepAliveRing.renderOrder = 3;
-      keepAliveGroup.add(keepAliveRing);
+      convoyRing = new THREE.Mesh(convoyGeometry, convoyMaterial);
+      convoyRing.position.copy(worldOf(site.lon, site.lat, 4));
+      convoyRing.rotation.x = -Math.PI / 2;
+      convoyRing.renderOrder = 3;
+      convoyGroup.add(convoyRing);
     },
     previewSite(site) {
       disposeGroup(previewGroup);
@@ -1950,8 +1950,8 @@ function createScene(
       blockMaterial.dispose();
       ringGeometry.dispose();
       ringMaterial.dispose();
-      keepAliveGeometry.dispose();
-      keepAliveMaterial.dispose();
+      convoyGeometry.dispose();
+      convoyMaterial.dispose();
       sky.dispose();
       scene.background = null;
       renderer.dispose();
@@ -2003,7 +2003,8 @@ export function Terrain3D({
   onPreview,
   siteStates,
   onSiteTap,
-  keepAliveId,
+  convoyId,
+  topUpIds,
   resetSignal,
 }: {
   layers: Record<LayerKey, boolean>;
@@ -2028,8 +2029,10 @@ export function Terrain3D({
   /** Existing-site status by site id; tapping a marker cycles its override. */
   siteStates: Record<string, SiteMarkerState>;
   onSiteTap: (id: string) => void;
-  /** Existing site the recommendation says to refuel, once the evaluation is done. */
-  keepAliveId: string | null;
+  /** Site the plan sends the convoy to, once the evaluation is done. */
+  convoyId: string | null;
+  /** Sites the plan assumes local crews top up before their access closes. */
+  topUpIds: string[];
   resetSignal: number;
 }) {
   // The baked assets are fetched from the client only: this component is
@@ -2135,8 +2138,8 @@ export function Terrain3D({
   }, [routeRun?.skip]);
 
   useEffect(() => {
-    sceneRef.current?.highlightKeepAlive(keepAliveId);
-  }, [keepAliveId, terrain]);
+    sceneRef.current?.highlightConvoy(convoyId);
+  }, [convoyId, terrain]);
 
   const winnerSite = routeSites?.find((site) => site.id === winnerId) ?? null;
   useEffect(() => {
@@ -2277,7 +2280,7 @@ export function Terrain3D({
                     <button
                       type="button"
                       onClick={() => onSiteTap(anchor.id)}
-                      title={`${anchor.label} · ${status}${state?.manual ? ' (manual)' : ''} · ${why}${anchor.detail === 'placeholder site' ? ' · placeholder site' : ''}`}
+                      title={`${anchor.label} · ${status}${state?.manual ? ' (manual)' : ''} · ${why}${topUpIds.includes(anchor.id) ? ' · topped up by a local crew in the plan' : ''}${anchor.detail === 'placeholder site' ? ' · placeholder site' : ''}`}
                       aria-label={`${anchor.label}, ${status}${state?.manual ? ', manual override' : ''}; tap to change`}
                       className="pointer-events-auto flex -translate-x-1/2 -translate-y-full cursor-pointer flex-col items-center"
                     >
@@ -2293,6 +2296,9 @@ export function Terrain3D({
                         {anchor.label}
                         {state?.manual && (
                           <span className="ml-1 rounded bg-sky-400/20 px-1 font-normal text-sky-200">manual</span>
+                        )}
+                        {topUpIds.includes(anchor.id) && (
+                          <span className="ml-1 rounded bg-emerald-400/20 px-1 font-normal text-emerald-200">top-up</span>
                         )}
                         {anchor.detail === 'placeholder site' && (
                           <span className="ml-1 font-normal text-slate-500">seed</span>

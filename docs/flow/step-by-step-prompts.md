@@ -10,7 +10,7 @@
 - The forecast is a simple, transparent model and is labelled *illustrative*. Honest beats impressive.
 - Motion has a job: fly-up = "think bigger", fly-down = "now decide", wave = "how far can the truck get".
 
-**Two parts.** Steps 0–9 (done) build the flood story: gauge, forecast, fly-up, route wave, candidates, winner. Part 2, Steps 10–19, puts the *network* in — existing sites, how and when they fail, the coverage hole, a backhaul-aware recommendation, real population and evacuation centres, a real ML forecast with an uncertainty band, a 2014 hindcast and a method panel — so the headline number becomes people without signal and the claim is a telecom claim.
+**Two parts.** Steps 0–9 (done) build the flood story: gauge, forecast, fly-up, route wave, candidates, winner. Part 2, Steps 10–19, puts the *network* in — existing sites, how and when they fail, the coverage hole, a backhaul-aware recommendation, real population, a plan in two tiers, a real ML forecast with an uncertainty band, a 2014 hindcast and a method panel — so the headline number becomes people without signal and the claim is a telecom claim.
 
 **How to use this file.** Paste one step's prompt into Claude Code, let it finish, and run the *You should see* check yourself. If it is not right, redirect with a short follow-up (the *If it's not right* line is the most likely one) before moving to the next step. Every step leaves the app working and `tsc` / lint / build clean, so you can stop after any step.
 
@@ -309,7 +309,7 @@ In lib/network.ts add `coverageAt(terrain, sites, statusAtHour)` that unions the
 
 Scene: during the Site stage wave, as each site's failureHour is passed by the planned hour, its coverage fan fades from emerald to grey (the fan you already draw; keep the geometry, animate the material colour and opacity). Draw surviving sites' fans faintly. This is the hole: no new layer.
 
-Numbers: replace "reaches N cut-off homes" everywhere with "reconnects N homes without signal" = homes in the hole at the planned hour that the candidate's viewshed covers. The winner card's big number becomes "homes reconnected" with a sub-line "of M without signal at HH:MM". The Site panel readout gains one line: "Without signal at the peak: M homes (2 evacuation centres)" — leave the centres part for Step 15.
+Numbers: replace "reaches N cut-off homes" everywhere with "reconnects N homes without signal" = homes in the hole at the planned hour that the candidate's viewshed covers. The winner card's big number becomes "homes reconnected" with a sub-line "of M without signal at HH:MM". The Site panel readout gains one line: "Without signal at the peak: M homes".
 
 Confirm the number no longer changes when the gauge moves unless a site's status changes. Run tsc, oxlint, build.
 ```
@@ -336,7 +336,7 @@ Update scripts/check-routes.mjs (or add check-sites.mjs) to print both option ta
 
 **You should see:** the winner card names its backhaul parent and a dashed line shows it; candidates without any surviving site in view never appear; when refuelling a site would keep more people connected than a new tower, the card says so and the tower is the alternative.
 
-**If it's not right:** "Backhaul range 20 km", "Always show both options side by side", or "Weight evacuation centres 20× a home" (after Step 15).
+**If it's not right:** "Backhaul range 20 km" or "Always show both options side by side".
 
 ---
 
@@ -358,25 +358,44 @@ Update the winner card and Site panel copy. Run the bake, tsc, oxlint, build; co
 
 **If it's not right:** "Use GHSL instead", "Round people to the nearest 50", or "Show population density as a faint layer in the overview only."
 
+**What happened (commit 8c5d283):** the ranking did change. WorldPop puts three times more people in the lowland around Manek Urai and Kampung Manjor than the illustrative houses did, so a local refuel of one lowland site (13,222 people) outranked the convoy-plus-tower plan (8,604) and the portable tower vanished from the card. That is a flaw in the plan structure, not in the data: Step 15 fixes it.
+
 ---
 
-## Step 15 — Evacuation centres
+## Step 15 — Baseline top-ups, then the scarce moves
 
-**Goal:** the number a district officer acts on.
+**Goal:** the card decides where the one convoy and the one portable tower go. Routine refuels are assumed, not ranked against them.
 
 **Prompt**
 
 ```
-Fetch OSM amenity=school, amenity=community_centre and amenity=place_of_worship (surau/mosque halls) in the AOI in the bake and write them to terrain.json as `centres` (name, lon, lat, kind). In Malaysia relief centres (PPS) are almost always schools and halls; label them "likely evacuation centres" in the UI and README, and note that JKM publishes the real list during an event.
+Vocabulary first, and use it in code comments, the card and the README: "site" = one of the 12 existing masts in terrain.json; "portable tower" = the cell-on-wheels driven out from the depot; "convoy" = the one genset trailer from the depot; "top-up" = refuelling a site's generator. Stop calling an existing site a tower.
 
-lib/network.ts: for each hour, which centres have no signal (not covered by any live site and not covered by the portable tower if placed). Weight centres in the site score: score = people reconnected + CENTRE_WEIGHT × centres reconnected, CENTRE_WEIGHT = 500 (illustrative; a centre is a rescue-coordination point). Show centres as small hollow markers only in the Site stage, red-ringed when without signal at the planned hour; the panel line becomes "Without signal at the peak: 1,900 people · 2 evacuation centres".
+lib/recommend.ts: split keep-alive into two tiers.
+- Baseline top-ups: every site whose failureCause is 'power' and whose accessCutHour > 0 (a local crew can still reach a fuel source by open road) is assumed topped up before its access closes and stays live through the planned hour. Return `baseline: { sites, by, peopleKept }` where `by` is the earliest accessCutHour and peopleKept counts people in the hole covered by the UNION of the baseline sites' viewsheds (they overlap; do not sum per site).
+- Residual hole: coverageHole with liveAt(plannedHour) ∪ baseline sites. This becomes the headline "Without signal at HH:MM" on the Site panel and the card's "of N" line.
+- Scarce moves, ranked over the residual hole only: generator-run options (one convoy) and the portable tower (one unit, microwave link to a site live in the plan, baseline sites included). Plans = convoy only / portable tower only / convoy + portable tower, ranked by people on signal, best plus two alternatives as today. When nothing is feasible (30 m: no convoy arrives in time, no candidate has a link) the card still renders with the baseline line and one sentence: "No convoy or portable tower can reach the valley in time."
 
-Run the bake, tsc, oxlint, build.
+Card copy, shorter than today. Delete the ranking-explanation paragraph (it moves to the method panel in Step 18):
+  RECOMMENDATION
+  Generator run to Kuala Balah + portable tower at Kampung Bukit Bedak
+  8,604 people kept on signal · of 13,811 without signal at 07:07
+  1  Convoy to Kuala Balah by 21:07
+  2  Portable tower at Kampung Bukit Bedak, microwave to Kuala Balah, 10.3 km
+  Local crews top up 5 sites before 22:07 · keeps 22,803
+  Alternatives: two one-line entries
+Site panel: keep the count lines, drop the two helper sentences (under the "Without signal" number and under the candidate tally). No new panels, stages or controls.
+
+Scene: baseline sites keep their status dot green and carry a small "top-up" tag instead of the pulsing ring; the pulsing amber ring stays for the convoy site; the winner mast, fan and dashed backhaul line for the portable tower are unchanged.
+
+scripts/check-sites.mjs prints the baseline sites with their union peopleKept, the residual hole, convoy options, candidates and plans. README: rewrite the recommendation section around the two tiers and the vocabulary. Run tsc, oxlint, build; full headless run at 27, 28 and 30 m.
+
+Expected at 27 m from the scratchpad simulation: baseline 5 sites keep 22,803; residual 13,811; best 8,604 (convoy to Kuala Balah 7,476 + portable tower at Kampung Bukit Bedak 1,128); alternatives 7,476 (convoy only) and 5,141 (convoy to Jelawang + portable tower at Jelawang).
 ```
 
-**You should see:** a handful of school/hall markers; at the peak one or two are red-ringed; the winner card mentions how many it brings back.
+**You should see:** at 27 m the headline reads 13,811 without signal; the card's big number is 8,604 with the convoy and the portable tower as the two numbered steps and one line for the 5 top-ups; the mast, fan and dashed line are back on Kampung Bukit Bedak; at 30 m the card says nothing arrives in time.
 
-**If it's not right:** "Schools only", "Weight 1,000", or "Hide centre markers until the wave has run."
+**If it's not right:** "Show the top-up sites as a list", "Rank portable-tower-only plans first", or "Let the convoy top up two sites in one run."
 
 ---
 
@@ -439,7 +458,7 @@ Add a "Hindcast: December 2014" mode reachable from the Method-library rail icon
 **Prompt**
 
 ```
-Build a Method panel behind the "Method library" rail icon (desktop: a wide glass sheet over the map; mobile: full-screen sheet). Sections, each a short table: Real data (SRTM, Sentinel-2, OSM roads/rail/buildings/schools, WorldPop, OpenCellID/OSM sites, WeatherNext) with licence and date; Derived (HAND, viewshed, road graph, route wave) with the algorithm in one line; Assumptions — every constant with its value and where a real one comes from: gauge→HAND mapping, leaky-store constants, embankment allowance, 150 m cut run, slope gate, battery/genset hours, backhaul rule, coverage radius, centre weight; Seeds — hand-placed sites, flagged. Pull the values from the code (export the constants) so the panel cannot drift from the model. Link the hindcast (Step 17). Remove the remaining dead rail icons (Overview, Operator profile, Settings) or make them no-ops with a tooltip "not in this concept".
+Build a Method panel behind the "Method library" rail icon (desktop: a wide glass sheet over the map; mobile: full-screen sheet). Sections, each a short table: Real data (SRTM, Sentinel-2, OSM roads/rail/buildings, WorldPop, OpenCellID/OSM sites, WeatherNext) with licence and date; Derived (HAND, viewshed, road graph, route wave) with the algorithm in one line; Assumptions — every constant with its value and where a real one comes from: gauge→HAND mapping, leaky-store constants, embankment allowance, 150 m cut run, slope gate, battery/genset hours, convoy speed, backhaul rule, coverage radius; Seeds — hand-placed sites, flagged. Pull the values from the code (export the constants) so the panel cannot drift from the model. Link the hindcast (Step 17). Remove the remaining dead rail icons (Overview, Operator profile, Settings) or make them no-ops with a tooltip "not in this concept".
 ```
 
 **You should see:** one panel that answers "what's real?" in under a minute; no dead icons.

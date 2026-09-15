@@ -272,17 +272,19 @@ export type CoverageHole = {
 /**
  * The hole at `hour`: people covered by a live site right now that no site
  * still live at `hour` covers. Flooding alone does not put anyone here — a
- * flooded home under a working site still has signal.
+ * flooded home under a working site still has signal. `alsoLive` names sites
+ * a plan keeps on air past their modelled failure (topped up by a crew).
  */
 export function coverageHole(
   terrain: TerrainData,
   masks: Map<string, ViewshedMask>,
   network: NetworkAssessment,
   hour: number,
+  alsoLive: string[] = [],
 ): CoverageHole {
   const cells = populatedCells(terrain);
   const now = coverageAt(masks, network.liveAt(0));
-  const later = coverageAt(masks, network.liveAt(hour));
+  const later = coverageAt(masks, [...network.liveAt(hour), ...alsoLive]);
   const mask = new Uint8Array(cells.count);
   let people = 0;
   let coveredNow = 0;
