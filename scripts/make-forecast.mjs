@@ -4,10 +4,11 @@
  *
  *   node scripts/make-forecast.mjs
  *
- * FALLBACK ONLY since Step 16. The app reads real, dated forecasts
- * (scripts/fetch-weathernext.py, scripts/fetch-replay.py) and opens this file
- * only if public/forecast-live.json cannot be loaded. Its "catchment mean" is
- * a tile mean of an invented convective band, not a basin mean.
+ * This is the demo's "Scenario · design storm": synthetic, labelled as such
+ * on the chip and in the README, the way flood planners use a design storm.
+ * The three real feeds (scripts/fetch-weathernext.py, scripts/fetch-replay.py)
+ * sit behind the same chip. Its "catchment mean" is a tile mean of the drawn
+ * band, not a basin mean.
  *
  * The pattern is a convective band that forms over the Gunung Stong massif
  * in the south-west, drifts north-east along the Galas valley over about ten
@@ -115,7 +116,9 @@ for (let h = 0; h < HOURS; h += 1) {
 }
 
 const forecast = {
-  source: 'illustrative — replace with MET Malaysia / GPM IMERG',
+  source: 'Design storm (synthetic, for demonstration): a convective band forming over Gunung Stong and drifting north-east along the Galas valley, peaking at hour 6',
+  terms: 'synthetic — not a forecast; the three dated feeds behind the same chip are real',
+  mode: 'scenario',
   issuedAt: ISSUED_AT,
   station: 'Kuala Krai, Sungai Kelantan',
   aoi,
@@ -123,6 +126,12 @@ const forecast = {
   hours: HOURS,
   units: { rain: 'mm/h', order: 'row-major, north row first' },
   catchmentMeanMmPerHour,
+  spatial: 'drawn on the 16x14 tile grid; the catchment mean is the tile mean, not a basin mean',
+  gauge: {
+    reading: null,
+    station: 'Kuala Krai (Sungai Kelantan), danger level 25.0 m',
+    note: 'the demo opens at 27.0 m, two metres above danger level',
+  },
   rain,
 };
 

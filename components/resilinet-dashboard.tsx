@@ -51,6 +51,7 @@ import {
   loadForecast,
   MAX_LEVEL,
   MIN_LEVEL,
+  wallClockMode,
 } from '@/lib/forecast';
 import {
   assessNetwork,
@@ -586,9 +587,11 @@ function GaugeControl({
         title={forecast?.source ?? 'Forecast source'}
         aria-label={`Forecast source: ${forecastLabel(forecast, mode)}. Tap to change`}
         className={`mt-2 min-h-7 rounded-md border px-2 py-1 text-left text-[10px] font-semibold leading-4 tracking-[0.06em] uppercase tabular-nums ${
-          mode === 'live'
-            ? 'border-emerald-300/25 bg-emerald-400/10 text-emerald-200 hover:bg-emerald-400/20'
-            : 'border-sky-300/25 bg-sky-400/10 text-sky-200 hover:bg-sky-400/20'
+          mode === 'scenario'
+            ? 'border-amber-300/25 bg-amber-400/10 text-amber-200 hover:bg-amber-400/20'
+            : mode === 'live'
+              ? 'border-emerald-300/25 bg-emerald-400/10 text-emerald-200 hover:bg-emerald-400/20'
+              : 'border-sky-300/25 bg-sky-400/10 text-sky-200 hover:bg-sky-400/20'
         }`}
       >
         {forecastLabel(forecast, mode)}
@@ -1571,8 +1574,9 @@ export function ResilinetDashboard() {
   });
   const [stage, setStage] = useState<Stage>('now');
   const [gauge, setGauge] = useState(GAUGE_DEFAULT);
-  // Which dated forecast the demo runs on; the chip beside the clock cycles it.
-  const [mode, setMode] = useState<ForecastMode>('live');
+  // Which rain the demo runs on; the chip beside the clock cycles it. The
+  // scenario (a synthetic design storm) is the default; the dated feeds are real.
+  const [mode, setMode] = useState<ForecastMode>('scenario');
   const [rawForecast, setRawForecast] = useState<Forecast | null>(null);
   // The same baked assets the scene uses; needed here for routing and sites.
   const [terrain, setTerrain] = useState<TerrainData | null>(null);
@@ -1626,14 +1630,14 @@ export function ResilinetDashboard() {
   }, []);
 
   const clock = useClock();
-  // Live: "now" is the wall clock and the file is trimmed to the current hour
-  // once an hour. Replays: "now" is the event's hour 0, so nothing moves.
+  // Scenario and Live: "now" is the wall clock; the live file is trimmed to
+  // the current hour once an hour. Replays: "now" is the event's hour 0.
   const alignAt = mode === 'live' && clock !== null ? Math.floor(clock / 3_600_000) * 3_600_000 : null;
   const forecast = useMemo(
     () => (rawForecast && alignAt !== null ? alignToNow(rawForecast, alignAt) : rawForecast),
     [rawForecast, alignAt],
   );
-  const now = mode === 'live' ? clock : rawForecast ? Date.parse(rawForecast.issuedAt) : null;
+  const now = wallClockMode(mode) ? clock : rawForecast ? Date.parse(rawForecast.issuedAt) : null;
 
   // The river-level curve starts from the observed gauge reading. Where the
   // source has an ensemble spread the plan runs on p50 and the timeline shows

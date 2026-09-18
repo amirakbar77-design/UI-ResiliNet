@@ -1,16 +1,15 @@
 /**
- * Hourly rain forecast over the terrain AOI and the river-level curve
- * derived from it. Three dated, sourced inputs share this shape and run
- * through the same model:
+ * Hourly rain over the terrain AOI and the river-level curve derived from
+ * it. Four inputs share this shape and run through the same model:
  *
+ *   scenario      public/forecast.json       a synthetic design storm for the demo (scripts/make-forecast.mjs); the default
  *   live          public/forecast-live.json  WeatherNext 3 statistics, newest init (scripts/fetch-weathernext.py)
  *   replay-2024   public/forecast-2024.json  WeatherNext 2 archive, issue 27 Nov 2024 00Z (scripts/fetch-replay.py)
  *   hindcast-2014 public/forecast-2014.json  ERA5-Land reanalysis, 22 Dec 2014 06Z + 72 h (scripts/fetch-replay.py)
  *
- * The river model is deliberately simple and transparent so every number on
- * screen can be traced back to it. `public/forecast.json` (illustrative,
- * scripts/make-forecast.mjs) is kept only as a fallback if the live file is
- * missing.
+ * The scenario is labelled as such everywhere; the three dated feeds are
+ * real. The river model is deliberately simple and transparent so every
+ * number on screen can be traced back to it.
  */
 
 // Self-contained on purpose: scripts/check-forecast.mjs imports this module
@@ -31,15 +30,16 @@ export const RECESSION = 0.12;
 /** Hours for rain over the catchment to reach the gauge. Real: time of concentration for the basin. */
 export const LAG_HOURS = 2;
 
-export type ForecastMode = 'live' | 'replay-2024' | 'hindcast-2014';
-export const FORECAST_MODES: ForecastMode[] = ['live', 'replay-2024', 'hindcast-2014'];
+export type ForecastMode = 'scenario' | 'live' | 'replay-2024' | 'hindcast-2014';
+export const FORECAST_MODES: ForecastMode[] = ['scenario', 'live', 'replay-2024', 'hindcast-2014'];
 export const FORECAST_FILES: Record<ForecastMode, string> = {
+  scenario: '/forecast.json',
   live: '/forecast-live.json',
   'replay-2024': '/forecast-2024.json',
   'hindcast-2014': '/forecast-2014.json',
 };
-/** The illustrative file, used only when the live file cannot be loaded. */
-const FALLBACK_FILE = '/forecast.json';
+/** Modes whose hour 0 is the wall clock; the replays pin "now" to their issue time. */
+export const wallClockMode = (mode: ForecastMode) => mode === 'scenario' || mode === 'live';
 
 export type Forecast = {
   source: string;
@@ -85,7 +85,8 @@ export async function loadForecast(mode: ForecastMode = 'live'): Promise<Forecas
   const response = await fetch(FORECAST_FILES[mode]);
   if (response.ok) return (await response.json()) as Forecast;
   if (mode === 'live') {
-    const fallback = await fetch(FALLBACK_FILE);
+    // Without a fetched live file the demo still opens, on the scenario.
+    const fallback = await fetch(FORECAST_FILES.scenario);
     if (fallback.ok) return (await fallback.json()) as Forecast;
   }
   throw new Error(`Failed to load forecast (${mode}): ${response.status}`);
@@ -118,11 +119,12 @@ export function alignToNow(forecast: Forecast, nowMs: number): Forecast {
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const utcDay = (at: Date) => `${at.getUTCDate()} ${MONTHS[at.getUTCMonth()]}`;
 
-/** Short label for the mode chip: "Live · WeatherNext 3, init 18 Sep 06Z". */
+/** Short label for the mode chip: "Scenario · design storm", "Live · WeatherNext 3, init 18 Sep 06Z". */
 export function forecastLabel(forecast: Forecast | null, mode: ForecastMode) {
   const at = forecast ? new Date(forecast.issuedAt) : null;
+  if (mode === 'scenario') return 'Scenario · design storm';
   if (mode === 'live') {
-    if (!forecast || !forecast.mode || !at) return 'Live · illustrative fallback';
+    if (!forecast || forecast.mode !== 'live' || !at) return 'Live · no live file, showing the scenario';
     return `Live · WeatherNext 3, init ${utcDay(at)} ${String(at.getUTCHours()).padStart(2, '0')}Z`;
   }
   if (mode === 'replay-2024') return `Replay · ${at ? `${utcDay(at)} ${at.getUTCFullYear()}` : '27 Nov 2024'}`;

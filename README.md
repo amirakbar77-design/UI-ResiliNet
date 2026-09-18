@@ -2,6 +2,8 @@
 
 An isolated, frontend-only interface prototype for the ResiliNet 3D disaster-response dashboard.
 
+**Purpose.** An emergency-communications officer, during a flood, decides where to send the one portable tower and the one generator convoy so that the most people keep signal before the roads close. Everything else in this app exists only to make that decision credible.
+
 This project does not import from or modify the working ResiliNet application, and it contains no backend, persistence, or operational data. Its economics are illustrative placeholders; its terrain, hydrology, population, and line-of-sight geometry are derived from open data at build time.
 
 ## Run locally
@@ -39,12 +41,13 @@ The dashboard walks an emergency communications officer through one decision in 
 
 Reset returns to Now with the gauge reading kept. Everything runs offline from the baked assets.
 
-## Forecasts: three dated, sourced inputs
+## Rain: a design storm and three dated feeds
 
-No invented rain anywhere. The chip beside the clock on the Now stage cycles three inputs, all fetched at bake time and committed as JSON so the demo runs offline, all run through the same river model and the same network model:
+The chip beside the clock on the Now stage cycles four inputs. The first is a **scenario**: a synthetic design storm drawn for the demo, labelled as such on the chip and in its file, the way flood planners use a design storm. It is the default because it tells the whole story in one sitting: rain arrives, the river climbs, roads close one by one, sites go dark, and the plan says where the convoy and the portable tower go while they can still get there. The other three are real, dated feeds fetched at bake time and committed as JSON so the demo runs offline. All four run through the same river model and the same network model:
 
 | Mode | File | Source | Terms | Hour 0 |
 |---|---|---|---|---|
+| **Scenario · design storm** | `public/forecast.json` | synthetic convective band over Gunung Stong drifting north-east along the valley, peaking at hour 6 (`scripts/make-forecast.mjs`); the catchment mean is a tile mean | none: not a forecast | the current hour |
 | **Live** | `public/forecast-live.json` | Google DeepMind **WeatherNext 3** statistics (experimental): IMERG-calibrated hourly precipitation, ensemble mean and p10/p50/p90, 0.1° grid, newest 00/06/12/18Z init, leads 1–48 h (`scripts/fetch-weathernext.py`, `npm run forecast:live`) | GDM Real-Time Weather Forecasting Experimental Data Terms (real-time); CC BY 4.0 (historic) | the current hour (the file is trimmed to "now" once an hour) |
 | **Replay · 27 Nov 2024** | `public/forecast-2024.json` | **WeatherNext 2** ensemble-mean archive on Earth Engine (`weathernext_2_0_0_mean`, 6-hourly, ~28 km), issue 2024-11-27 00Z, hours 0–72, with a lagged-ensemble band (p10/p50/p90 across the 26 Nov 00/06/12/18Z and 27 Nov 00Z issues for the same valid hour) (`scripts/fetch-replay.py`, `npm run forecast:replay`) | CC BY 4.0 | the issue time |
 | **Hindcast · 22 Dec 2014** | `public/forecast-2014.json` | **ERA5-Land** reanalysis (observation-based, ECMWF/C3S, hourly, ~11 km), 2014-12-22 06Z + 72 h, no band | Copernicus C3S licence | the start time |
@@ -57,7 +60,7 @@ No invented rain anywhere. The chip beside the clock on the Now stage cycles thr
 
 **Known limit, on purpose.** The river-model constants below were set against the illustrative file's tile-mean rain (up to 19 mm/h); real basin means run 1–4 mm/h, so with these constants both replays raise the modelled river by only about 1 m. Step 17 calibrates the constants against the 2014 event and says so here; they are not tuned quietly.
 
-`public/forecast.json` (`scripts/make-forecast.mjs`) is the old illustrative file, kept only as a fallback if the live file cannot be loaded, and labelled so on the chip.
+If the live file is missing the Live chip says so and shows the scenario.
 
 `lib/forecast.ts` turns catchment rain into a river level with a leaky store: each hour the level rises by `RUNOFF_COEF` (0.11 m per mm/h) times the rain that fell `LAG_HOURS` (2) earlier, and drains by `RECESSION` (0.12) of its height above `BASE_LEVEL` (0.5 m), clamped to 0.5–14 m and starting from the observed reading. All four constants are illustrative; the comments beside them say where a real value comes from (rating curve, unit hydrograph, fitted recession, time of concentration). `node scripts/check-forecast.mjs` prints the curve.
 
@@ -106,6 +109,27 @@ At the default gauge (27.0 m, planned for the outage at +14 h): 36,614 people lo
 
 Simplifications, stated on purpose: a topped-up or convoy-kept site does not revive the sites that hang off it by backhaul; the convoy serves one site; boats are not modelled, so "access closed" is pessimistic; and battery, genset and convoy figures are illustrative until an operator supplies real ones.
 
+## December 2014 hindcast
+
+The flood everyone remembers is the check. Hindcast mode (the chip beside the clock) loads the ERA5-Land rain from 22 Dec 2014 06Z and sets the gauge to the recorded **34.2 m** peak (JPS Kuala Krai, 24–25 Dec), so the network model and the road graph are read at the peak. `lib/hindcast.ts` compares four reported facts with the model; the Now panel lists them in Hindcast mode and `node scripts/check-hindcast.mjs` prints the same table. The verdicts fall where they fall.
+
+| Reported | Source | Model at 34.2 m | Verdict |
+|---|---|---|---|
+| Kemubu railway bridge lost | Malaysiakini, 30 Dec 2014 | the 214 m rail bridge over the Galas is cut, from a gauge of 30.1 m | **hit** |
+| Kuala Krai cut off by road | FloodList; ANCST post-event report | 2 km of road reachable from the depot (515 km when dry), nothing beyond 0.5 km | **hit** |
+| Kampung Kemubu out of contact for days | relief-mission paper, Mediterranean Journal of Social Sciences, 2015 | no modelled site sees Kemubu even before the flood; the nearest, Jelawang (6.5 km) and Dabong (8.2 km), are dark by +8 h | **miss** |
+| Maxis and Digi down in Kuala Krai, Celcom up | Malaysiakini / Yahoo News, 26 Dec 2014 (MCMC said the same day that systems were running) | 1 of 2 town sites down at the peak, both dark by +20 h; operators not separable | **partial** |
+
+At the peak the model has 1 site down, 9 on battery and 2 up; 10 of 12 are dark by +8 h and all 12 by +20 h. The town is an island and the network dies with the roads, which is the mechanism the reports describe.
+
+**The miss, plainly.** The site list is capped at twelve corroborated OpenCellID clusters snapped to dry ground; whichever site served Kampung Kemubu in 2014 is not among them, and the viewsheds of the two nearest sites do not reach the village. A model that never gave Kemubu signal cannot show it losing signal. An operator's site list fixes this; no rule was bent to hide it.
+
+**The partial.** OpenCellID clusters carry every network's cells, so the model cannot say "Maxis down, Celcom up". Of the two sites within 4 km of the town, Kuala Krai N is inundated at the peak and Kuala Krai E runs its genset until +20 h.
+
+**Calibration, stated rather than applied.** With the shipped constants, ERA5-Land's 119 mm from 22 Dec lifts the river from danger level to 28.0 m; the record was 34.2 m. Reaching it would need `RUNOFF_COEF` = 0.38, 3.5× the shipped value — and that coefficient would put the Nov 2024 replay at 31.5 m on 29 Nov 08:00, where Bernama reported 25.17 m. One linear coefficient cannot fit both events: ERA5-Land understates the 2014 rain (station totals exceeded 1,000 mm that week) and the stage–discharge relation at Kuala Krai is not linear. The constants stay as they are, the check script prints this arithmetic, and the fix is a JPS rating curve with a unit hydrograph, which the method panel will say.
+
+Sources: [Malaysiakini, 237,000 displaced, 21 dead](https://www.malaysiakini.com/news/284861) · [FloodList, Kelantan flooding worst recorded](https://floodlist.com/asia/malaysia-floods-kelantan-worst-recorded-costs) · [ANCST, The December 2014 flood in Kelantan](https://ancst.org/wp-content/uploads/2016/05/The-December-2014-Flood-in-Kelantan.pdf) · [Kelantan Flood 2014: reflections from a relief-aid mission to Kampung Kemubu](https://www.richtmann.org/journal/index.php/mjss/article/view/6507/6235) · [Kelantan flood victims plead for aid via social media](https://sg.news.yahoo.com/kelantan-flood-victims-plead-aid-via-social-media-023736443.html) · [Malay Mail, MCMC: telecommunication systems still running, 26 Dec 2014](https://www.malaymail.com/amp/news/malaysia/2014/12/26/telecommunication-systems-in-flood-hit-states-still-running-says-mcmc/808867)
+
 ## Moving around
 
 Drag to pan across the terrain. On a trackpad, pinch zooms toward the pointer, a two-finger scroll up or down flies the camera higher or lower, and a two-finger swipe left or right orbits the pivot; with a mouse, the wheel does the same (horizontal wheel orbits) and right-drag or ⌃-drag rotates. Zoom is eased rather than stepped, damping is scaled to the real frame interval so 60 Hz and 120 Hz displays feel the same, the pivot is re-grounded only after a gesture ends, and the render resolution adapts to measured frame times (a little lower during a gesture, full Retina density at rest). The camera drifts slowly once you stop interacting, and holds still under `prefers-reduced-motion`.
@@ -144,4 +168,5 @@ node scripts/check-forecast.mjs live        # or replay-2024 / hindcast-2014
 node scripts/check-network.mjs 27
 node scripts/check-hole.mjs
 node scripts/check-sites.mjs 27
+node scripts/check-hindcast.mjs
 ```

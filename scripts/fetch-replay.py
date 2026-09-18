@@ -249,10 +249,10 @@ def hindcast_2014():
         'catchmentMeanMmPerHour': mm_h,
         'spatial': '0.1 deg nearest cell',
         'gauge': {
-            'reading': None,
+            'reading': 34.2,
             'station': 'Kuala Krai (Sungai Kelantan), danger level 25.0 m',
-            'at': iso(START_2014),
-            'note': 'reading not found for 2014-12-22 06Z; the gauge reached its 34.2 m record on 25 Dec 2014',
+            'at': 'recorded peak, 24–25 Dec 2014',
+            'note': "the recorded 34.2 m peak is used as the hindcast's observed level so the check runs at the peak; the reading at 22 Dec 06Z was not found",
         },
         'rain': [[round(max(0.0, v) * 1000.0, 2) for v in grid[h]] for h in range(HOURS)],
     }

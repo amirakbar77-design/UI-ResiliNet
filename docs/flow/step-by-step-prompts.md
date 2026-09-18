@@ -1,5 +1,7 @@
 # ResiliNet demo flow — step-by-step prompts
 
+**The purpose, in one sentence.** An emergency-communications officer, during a flood, decides where to send the one portable tower and the one generator convoy so that the most people keep signal before the roads close. Everything else exists only to make that decision credible. Every remaining step is tested against this: if it does not make the tower decision clearer to the officer, cut it or move it to the method panel.
+
 **The story.** It is flooding *now*. The officer enters the river gauge reading and the valley floods on screen. But rain is still falling, so the system flies up to a top-down view and plays the hourly rain forecast over the catchment; a river-level timeline along the bottom shows the predicted river curve over the rain, with the peak hour pinned, while labels at the settlements show how hard it is raining in each place. The officer picks the hour to plan for (default: the peak) and the camera zooms back down into the 3D valley at that hour. One **Start** button then runs the evaluation in two visible phases: first the reachable road network lights up outward from the Kuala Krai depot and stops with a red mark wherever the road is under water; then tower candidates spawn one by one along the lit roads, each pulsing its line-of-sight coverage and counting how many cut-off homes it would reconnect. The best site is highlighted on the map with a compact card. No ranked list, no Accept/Modify/Reject, no decision council.
 
 **Design principles**
@@ -450,6 +452,26 @@ Add a "Hindcast: December 2014" mode reachable from the Method-library rail icon
 **You should see:** a short hits/misses list with the model's answer next to the reported fact; at 34.2 m the town is an island and most sites are dark.
 
 **If it's not right:** "Add the 2024 Nov event too", or "Show the hindcast as a badge on the Now stage instead."
+
+**What happened (19 Sep 2026):** the Hindcast mode already existed from Step 16 (the chip), so no rail-icon toggle was added — the screen rule stands and Step 18 builds the panel there. The 2014 file now carries the recorded 34.2 m peak as its gauge, so the check runs at the peak. `lib/hindcast.ts` + `scripts/check-hindcast.mjs` + a "Checked against the record" block on the Now panel in Hindcast mode. Result: bridge **hit** (cut from a 30.1 m gauge), town isolated **hit** (2 km reachable of 515), Kampung Kemubu **miss** (no modelled site sees it even before the flood — the 12-site cap), Maxis/Digi **partial** (1 of 2 town sites down at the peak, both dark by +20 h; operators not separable). 10 of 12 sites dark by +8 h, all by +20 h. Calibration stated, not applied: reaching 34.2 m from ERA5-Land rain needs RUNOFF_COEF 0.38 (3.5×), which would put the 2024 replay at 31.5 m where 25.17 m was reported.
+
+---
+
+## Step 17.1 — Re-anchor: the scenario is the default, validation leaves the screen
+
+**Goal:** the judge sees the decision in sixty seconds again.
+
+**What was wrong (19 Sep 2026):** after Steps 16–17 the app opened on a flat forecast and, in Hindcast mode, on a validation list at the 34.2 m peak where nothing could move. Real basin rain (1–4 mm/h) does not lift the river with constants tuned to the synthetic storm, and the 27.0 m default already had the west roads cut at hour 0, so the forecast decided nothing.
+
+**Prompt**
+
+```
+Bring the synthetic forecast back as a mode: 'scenario' → public/forecast.json, first in the chip's cycle and the default, labelled "Scenario · design storm" on the chip and in the file (source, terms, mode). Its hour 0 is the wall clock, gauge 27.0 m, exactly the Step 15 flow. The three dated feeds stay behind the same chip as data feeds. Take the "Checked against the record" block off the Now panel; lib/hindcast.ts and scripts/check-hindcast.mjs stay for the method panel in Step 18. README: the purpose sentence first, the scenario documented as a design storm, the real feeds with their limits. tsc, oxlint, build, headless run in scenario mode.
+```
+
+**You should see:** the app opens on "Scenario · design storm" with the river climbing to about 7 m, the outage at +14 h, and the convoy-plus-tower plan at 8,604 people; the chip still cycles to Live, Replay and Hindcast; nothing about validation on the Now panel.
+
+**Optional later, if time allows:** a river model that responds to real basin rain (runoff coefficient × basin area, a unit hydrograph, a rating curve anchored on the danger level and the 2014 record; GPM IMERG for the 2014 rain), calibrated in the open. Without it the real modes show real rain over a river that barely moves, which the README states.
 
 ---
 
