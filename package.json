@@ -11,7 +11,9 @@
     "bake:terrain": "node --env-file-if-exists=.env scripts/bake-terrain.mjs",
     "start": "wrangler dev --config dist/server/wrangler.json",
     "lint": "oxlint",
-    "format": "oxfmt"
+    "format": "oxfmt",
+    "forecast:live": ".venv-wx/bin/python scripts/fetch-weathernext.py",
+    "forecast:replay": ".venv-wx/bin/python scripts/fetch-replay.py --all"
   },
   "dependencies": {
     "@base-ui/react": "1.7.0",

@@ -39,9 +39,15 @@ import { Slider } from '@/components/ui/slider';
 import { Switch } from '@/components/ui/switch';
 import type { RouteRun, SiteMarkerState, View } from '@/components/terrain-3d';
 import {
+  alignToNow,
+  type FloodBand,
   type FloodCurve,
   type Forecast,
+  FORECAST_MODES,
+  type ForecastMode,
+  floodBand,
   floodCurve,
+  forecastLabel,
   loadForecast,
   MAX_LEVEL,
   MIN_LEVEL,
@@ -107,8 +113,8 @@ const GAUGE_DEFAULT = 27;
 /**
  * Wall-clock "now", at minute resolution so re-renders only happen when the
  * displayed time actually changes. null during prerender, before the browser
- * clock is available. The forecast data is illustrative, but its hour 0 is
- * always the real current time: forecast hour h reads as now + h hours.
+ * clock is available. In Live mode forecast hour 0 is the current hour and
+ * hour h reads as now + h hours; a replay pins "now" to the event's issue time.
  */
 function useClock() {
   return useSyncExternalStore(
@@ -126,6 +132,18 @@ const clockFormat = new Intl.DateTimeFormat('en-GB', {
   minute: '2-digit',
   hour12: false,
 });
+const dayClockFormat = new Intl.DateTimeFormat('en-GB', {
+  weekday: 'short',
+  hour: '2-digit',
+  minute: '2-digit',
+  hour12: false,
+});
+
+/** "Thu 08:00" for multi-day horizons. */
+function dayClockLabel(now: number | null, hoursAhead = 0) {
+  if (now === null) return '--:--';
+  return dayClockFormat.format(new Date(now + hoursAhead * 3_600_000)).replace(',', '');
+}
 
 /** "21:37" for now + hoursAhead, or a placeholder before the clock is known. */
 function clockLabel(now: number | null, hoursAhead = 0) {
@@ -528,12 +546,18 @@ function GaugeControl({
   setGauge,
   now,
   network,
+  mode,
+  forecast,
+  onCycleMode,
   onNext,
 }: {
   gauge: number;
   setGauge: (value: number) => void;
   now: number | null;
   network: NetworkAssessment | null;
+  mode: ForecastMode;
+  forecast: Forecast | null;
+  onCycleMode: () => void;
   onNext: () => void;
 }) {
   const aboveDanger = gauge - GAUGE_DANGER;
@@ -555,6 +579,20 @@ function GaugeControl({
           Now · {clockLabel(now)}
         </span>
       </div>
+      {/* The forecast source: the one control Part 2 adds. Tap to cycle. */}
+      <button
+        type="button"
+        onClick={onCycleMode}
+        title={forecast?.source ?? 'Forecast source'}
+        aria-label={`Forecast source: ${forecastLabel(forecast, mode)}. Tap to change`}
+        className={`mt-2 min-h-7 rounded-md border px-2 py-1 text-left text-[10px] font-semibold leading-4 tracking-[0.06em] uppercase tabular-nums ${
+          mode === 'live'
+            ? 'border-emerald-300/25 bg-emerald-400/10 text-emerald-200 hover:bg-emerald-400/20'
+            : 'border-sky-300/25 bg-sky-400/10 text-sky-200 hover:bg-sky-400/20'
+        }`}
+      >
+        {forecastLabel(forecast, mode)}
+      </button>
 
       <div className="mt-3 rounded-xl border border-slate-600/30 bg-slate-900/35 p-3.5">
         <label
@@ -657,6 +695,8 @@ const PLAY_HOURS_PER_SECOND = 2;
 function ForecastTimeline({
   forecast,
   curve,
+  band,
+  sourceLabel,
   hour,
   setHour,
   now,
@@ -665,7 +705,11 @@ function ForecastTimeline({
   onNext,
 }: {
   forecast: Forecast;
+  /** The curve the plan uses: p50 where the source has a spread, else the mean. */
   curve: FloodCurve;
+  /** p10–p90 curves when the source has an ensemble spread. */
+  band: FloodBand | null;
+  sourceLabel: string;
   hour: number;
   setHour: (hour: number) => void;
   now: number | null;
@@ -690,6 +734,16 @@ function ForecastTimeline({
     .map((level, h) => `${h === 0 ? 'M' : 'L'}${x(h).toFixed(1)},${y(level).toFixed(1)}`)
     .join(' ');
   const areaPath = `${linePath} L${x(maxHour).toFixed(1)},${baseline} L${x(0).toFixed(1)},${baseline} Z`;
+  // The spread: p90 forward, p10 back.
+  const bandPath = band
+    ? band.p90.levels
+        .map((level, h) => `${h === 0 ? 'M' : 'L'}${x(h).toFixed(1)},${y(level).toFixed(1)}`)
+        .join(' ') +
+      band.p10.levels
+        .map((level, h) => ` L${x(maxHour - h).toFixed(1)},${y(band.p10.levels[maxHour - h]!).toFixed(1)}`)
+        .join('') +
+      ' Z'
+    : null;
 
   const peakHour = curve.peakHour();
   const peakLevel = curve.peakLevel();
@@ -719,8 +773,11 @@ function ForecastTimeline({
     setHour(next);
   };
 
+  // Every 3 h on a day, every 6 h on two, every 12 h beyond; longer runs get the weekday.
+  const labelStep = maxHour <= 30 ? 3 : maxHour <= 54 ? 6 : 12;
+  const timeLabel = maxHour > 30 ? dayClockLabel : clockLabel;
   const timeLabels: number[] = [];
-  for (let h = 0; h <= maxHour; h += 3) timeLabels.push(h);
+  for (let h = 0; h <= maxHour; h += labelStep) timeLabels.push(h);
   // Site failures as ticks on the baseline, fanned out when several share an hour.
   const tickColor: Record<FailureCause, string> = {
     inundation: 'rgb(248 113 113)',
@@ -748,7 +805,8 @@ function ForecastTimeline({
     }
   }
   const darkNow = network ? network.darkAt(hour) : 0;
-  const peakTagWidth = 74;
+  const peakRange = band ? `${band.p10.peakLevel().toFixed(1)}–${band.p90.peakLevel().toFixed(1)}` : null;
+  const peakTagWidth = peakRange ? 118 : 74;
   const peakTagX = clamp(x(peakHour) - peakTagWidth / 2, CHART_ML, CHART_W - CHART_MR - peakTagWidth);
   const peakTagY = Math.max(2, y(peakLevel) - 22);
 
@@ -759,8 +817,8 @@ function ForecastTimeline({
     >
       <div className="flex flex-wrap items-center gap-2">
         <div className="min-w-0 flex-1">
-          <p className="text-[11px] font-semibold tracking-[0.1em] text-slate-400 uppercase">
-            River forecast · Kuala Krai
+          <p className="truncate text-[11px] font-semibold tracking-[0.1em] text-slate-400 uppercase">
+            River forecast · {sourceLabel}
           </p>
           <p
             className="mt-0.5 text-sm font-semibold text-white tabular-nums"
@@ -903,6 +961,8 @@ function ForecastTimeline({
               fill="rgb(148 163 184 / 0.28)"
             />
           ))}
+          {/* ensemble spread, p10–p90 */}
+          {bandPath && <path d={bandPath} fill="rgb(56 189 248 / 0.16)" />}
           {/* river level */}
           <path d={areaPath} fill="rgb(56 189 248 / 0.22)" />
           <path
@@ -957,7 +1017,7 @@ function ForecastTimeline({
             fontWeight={600}
             fill="rgb(253 230 138)"
           >
-            Peak · {peakLevel.toFixed(1)} m
+            Peak · {peakLevel.toFixed(1)} m{peakRange ? ` (${peakRange})` : ''}
           </text>
           {/* outage pin: the hour the network is at its worst */}
           {outageHour !== null && network && (
@@ -1034,7 +1094,7 @@ function ForecastTimeline({
               fontSize={9}
               fill="rgb(148 163 184)"
             >
-              {h === 0 ? 'Now' : clockLabel(now, h)}
+              {h === 0 ? 'Now' : timeLabel(now, h)}
             </text>
           ))}
         </svg>
@@ -1264,6 +1324,9 @@ function StageContent({
   gauge,
   setGauge,
   now,
+  mode,
+  forecast,
+  onCycleMode,
   route,
   routesReady,
   plannedClock,
@@ -1311,6 +1374,9 @@ function StageContent({
             setGauge={setGauge}
             now={now}
             network={network}
+            mode={mode}
+            forecast={forecast}
+            onCycleMode={onCycleMode}
             onNext={onNext}
           />
         )}
@@ -1366,8 +1432,11 @@ type StageProps = {
   stage: Stage;
   gauge: number;
   setGauge: (value: number) => void;
-  /** Minute-resolution epoch ms, or null before the browser clock is known. */
+  /** Minute-resolution epoch ms (Live) or the event's hour 0 (replays); null before the clock is known. */
   now: number | null;
+  mode: ForecastMode;
+  forecast: Forecast | null;
+  onCycleMode: () => void;
   route: RouteState | null;
   routesReady: boolean;
   plannedClock: string;
@@ -1502,7 +1571,9 @@ export function ResilinetDashboard() {
   });
   const [stage, setStage] = useState<Stage>('now');
   const [gauge, setGauge] = useState(GAUGE_DEFAULT);
-  const [forecast, setForecast] = useState<Forecast | null>(null);
+  // Which dated forecast the demo runs on; the chip beside the clock cycles it.
+  const [mode, setMode] = useState<ForecastMode>('live');
+  const [rawForecast, setRawForecast] = useState<Forecast | null>(null);
   // The same baked assets the scene uses; needed here for routing and sites.
   const [terrain, setTerrain] = useState<TerrainData | null>(null);
   // Officer overrides of site status — how NOC alarms would enter later.
@@ -1531,24 +1602,48 @@ export function ResilinetDashboard() {
     };
   }, []);
 
+  // A new mode is a new event: reload the file, prefill the gauge with the
+  // event's recorded reading when one was found, and drop any plan in progress.
   useEffect(() => {
     let cancelled = false;
-    loadForecast().then(
+    loadForecast(mode).then(
       (data) => {
-        if (!cancelled) setForecast(data);
+        if (cancelled) return;
+        setRawForecast(data);
+        setGauge(data.gauge?.reading ?? GAUGE_DEFAULT);
+        setChosenHour(null);
+        setRoute(null);
+        setSiteOverrides({});
       },
       (error: unknown) => console.error('Failed to load forecast', error),
     );
     return () => {
       cancelled = true;
     };
+  }, [mode]);
+  const onCycleMode = useCallback(() => {
+    setMode((current) => FORECAST_MODES[(FORECAST_MODES.indexOf(current) + 1) % FORECAST_MODES.length]!);
   }, []);
 
-  // The river-level curve starts from the observed gauge reading.
-  const curve = useMemo(
-    () => (forecast ? floodCurve(forecast, gaugeToHandLevel(gauge)) : null),
-    [forecast, gauge],
+  const clock = useClock();
+  // Live: "now" is the wall clock and the file is trimmed to the current hour
+  // once an hour. Replays: "now" is the event's hour 0, so nothing moves.
+  const alignAt = mode === 'live' && clock !== null ? Math.floor(clock / 3_600_000) * 3_600_000 : null;
+  const forecast = useMemo(
+    () => (rawForecast && alignAt !== null ? alignToNow(rawForecast, alignAt) : rawForecast),
+    [rawForecast, alignAt],
   );
+  const now = mode === 'live' ? clock : rawForecast ? Date.parse(rawForecast.issuedAt) : null;
+
+  // The river-level curve starts from the observed gauge reading. Where the
+  // source has an ensemble spread the plan runs on p50 and the timeline shows
+  // p10–p90; a reanalysis has no spread and runs on its single series.
+  const { curve, band } = useMemo(() => {
+    if (!forecast) return { curve: null, band: null };
+    const level = gaugeToHandLevel(gauge);
+    const spread = floodBand(forecast, level);
+    return { curve: spread?.p50 ?? floodCurve(forecast, level), band: spread };
+  }, [forecast, gauge]);
   // Existing-network status and failure hours follow the gauge and the curve.
   const network = useMemo(
     () => (terrain && curve ? assessNetwork(terrain, curve, siteOverrides) : null),
@@ -1594,7 +1689,6 @@ export function ResilinetDashboard() {
     });
   }, []);
 
-  const now = useClock();
   // Now floods from the gauge; Forecast and Site from the curve at the chosen
   // hour (falling back to the gauge if the forecast file is unavailable).
   const plannedLevel = curve ? curve.levelAt(forecastHour) : gaugeToHandLevel(gauge);
@@ -1765,6 +1859,9 @@ export function ResilinetDashboard() {
     gauge,
     setGauge,
     now,
+    mode,
+    forecast,
+    onCycleMode,
     route,
     routesReady,
     plannedClock,
@@ -1806,6 +1903,8 @@ export function ResilinetDashboard() {
         <ForecastTimeline
           forecast={forecast}
           curve={curve}
+          band={band}
+          sourceLabel={forecastLabel(forecast, mode)}
           hour={forecastHour}
           setHour={setChosenHour}
           now={now}

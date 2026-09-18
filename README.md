@@ -39,9 +39,25 @@ The dashboard walks an emergency communications officer through one decision in 
 
 Reset returns to Now with the gauge reading kept. Everything runs offline from the baked assets.
 
-## Forecast model
+## Forecasts: three dated, sourced inputs
 
-`public/forecast.json` is illustrative (`scripts/make-forecast.mjs` draws a convective band that forms over Gunung Stong and drifts north-east along the valley, peaking around hour 6) and is labelled as such; its hour 0 is always the real current time. The file shape — an hourly rain grid over the AOI plus the catchment mean — is what MET Malaysia nowcasts or NASA GPM IMERG would fill.
+No invented rain anywhere. The chip beside the clock on the Now stage cycles three inputs, all fetched at bake time and committed as JSON so the demo runs offline, all run through the same river model and the same network model:
+
+| Mode | File | Source | Terms | Hour 0 |
+|---|---|---|---|---|
+| **Live** | `public/forecast-live.json` | Google DeepMind **WeatherNext 3** statistics (experimental): IMERG-calibrated hourly precipitation, ensemble mean and p10/p50/p90, 0.1° grid, newest 00/06/12/18Z init, leads 1–48 h (`scripts/fetch-weathernext.py`, `npm run forecast:live`) | GDM Real-Time Weather Forecasting Experimental Data Terms (real-time); CC BY 4.0 (historic) | the current hour (the file is trimmed to "now" once an hour) |
+| **Replay · 27 Nov 2024** | `public/forecast-2024.json` | **WeatherNext 2** ensemble-mean archive on Earth Engine (`weathernext_2_0_0_mean`, 6-hourly, ~28 km), issue 2024-11-27 00Z, hours 0–72, with a lagged-ensemble band (p10/p50/p90 across the 26 Nov 00/06/12/18Z and 27 Nov 00Z issues for the same valid hour) (`scripts/fetch-replay.py`, `npm run forecast:replay`) | CC BY 4.0 | the issue time |
+| **Hindcast · 22 Dec 2014** | `public/forecast-2014.json` | **ERA5-Land** reanalysis (observation-based, ECMWF/C3S, hourly, ~11 km), 2014-12-22 06Z + 72 h, no band | Copernicus C3S licence | the start time |
+
+**The basin.** Every catchment mean is the area-weighted mean over `public/terrain/basin.geojson`: HydroBASINS v1 level 9 traced upstream from the Kuala Krai gauge (102.199 E, 5.531 N) — 37 polygons, 11,502 km², dissolved. The river at Kuala Krai answers to that whole basin; the illustrative file's tile mean was a hydrology error.
+
+**What WeatherNext 3 gives, and does not.** Hourly, ~10 km, IMERG-calibrated ensemble statistics with a real spread, which is why the timeline can draw a p10–p90 band and tag the peak "8.9 m (7.5–10.4)". It does not resolve convective cells inside the valley (the 16×14 app grid is the 0.1° ensemble mean interpolated across roughly 4×3 model cells — a gradient, not storm cells) and its extremes are smoothed. The app plans on p50. **On a dry day Live shows no action — that is the system working.**
+
+**What each mode shows.** Replay 2024: 151 mm of basin-mean rain over the 72 h (the five issues agree within 149–178 mm), the rain arriving from hour 0. Hindcast 2014: 119 mm in the 72 h from 22 Dec 06Z in ERA5-Land, which is known to understate this event (station totals exceeded 1,000 mm that week). The recorded gauge readings at the two hour-0 times were not found; the files say so and the app keeps its 27.0 m default (Bernama reported 25.17 m at Kuala Krai on 29 Nov 2024 08:00 MYT; the 2014 flood peaked at the 34.2 m record on 25 Dec). `node scripts/check-forecast.mjs [live|replay-2024|hindcast-2014] [level]` prints any file with its band.
+
+**Known limit, on purpose.** The river-model constants below were set against the illustrative file's tile-mean rain (up to 19 mm/h); real basin means run 1–4 mm/h, so with these constants both replays raise the modelled river by only about 1 m. Step 17 calibrates the constants against the 2014 event and says so here; they are not tuned quietly.
+
+`public/forecast.json` (`scripts/make-forecast.mjs`) is the old illustrative file, kept only as a fallback if the live file cannot be loaded, and labelled so on the chip.
 
 `lib/forecast.ts` turns catchment rain into a river level with a leaky store: each hour the level rises by `RUNOFF_COEF` (0.11 m per mm/h) times the rain that fell `LAG_HOURS` (2) earlier, and drains by `RECESSION` (0.12) of its height above `BASE_LEVEL` (0.5 m), clamped to 0.5–14 m and starting from the observed reading. All four constants are illustrative; the comments beside them say where a real value comes from (rating curve, unit hydrograph, fitted recession, time of concentration). `node scripts/check-forecast.mjs` prints the curve.
 
@@ -102,7 +118,9 @@ Drag to pan across the terrain. On a trackpad, pinch zooms toward the pointer, a
 npm run bake:terrain
 ```
 
-The script downloads its inputs once into `.cache/` (gitignored) and writes `elevation.bin`, `hand.bin`, `houses.bin`, `population.bin`, `roads.json`, `surface.jpg`, and `terrain.json`. `node scripts/check-hole.mjs` prints the hole in people next to the illustrative-house count it replaced. `node scripts/make-forecast.mjs` regenerates the illustrative forecast.
+The script downloads its inputs once into `.cache/` (gitignored) and writes `elevation.bin`, `hand.bin`, `houses.bin`, `population.bin`, `roads.json`, `surface.jpg`, and `terrain.json`. `node scripts/check-hole.mjs` prints the hole in people next to the illustrative-house count it replaced.
+
+The forecasts are fetched with Python (`.venv-wx`, gitignored: xarray, zarr, gcsfs, zstandard, numpy, shapely, earthengine-api) and a Google account with WeatherNext access, signed in with `gcloud auth login`; the Earth Engine calls use the same gcloud token with the `resilinet-3d` project. `npm run forecast:live` refreshes the live file (48 leads × 4 statistics, about six minutes the first time, instant from `.cache/weathernext/` after); `npm run forecast:replay` exports the basin and rewrites both replay files. None of this runs in the app.
 
 ## Data sources
 
@@ -110,6 +128,11 @@ The script downloads its inputs once into `.cache/` (gitignored) and writes `ele
 - Imagery: Sentinel-2 cloudless 2020 by EOX IT Services GmbH, CC BY 4.0, based on modified Copernicus Sentinel data 2020.
 - Roads, railway, settlements, residential areas and buildings: © OpenStreetMap contributors, ODbL.
 - Network sites: OpenStreetMap `man_made=mast` / `communications_tower` / `tower` + `tower:type=communication` (ODbL); OpenCellID cells when `OPENCELLID_KEY` is set in `.env` at bake time (see `.env.example`) (CC BY-SA 4.0 — get a free key at opencellid.org → account → API keys); hand-placed seeds where the map is empty.
+- Population: WorldPop 2020 UN-adjusted constrained, 100 m, CC BY 4.0.
+- Live forecast: Google DeepMind WeatherNext 3 statistics, `gs://weathernext3_statistics_spatial` (GDM Real-Time Weather Forecasting Experimental Data Terms; CC BY 4.0 for historic data).
+- Replay forecast: WeatherNext 2 ensemble-mean archive, Earth Engine `projects/gcp-public-data-weathernext/assets/weathernext_2_0_0_mean`, CC BY 4.0.
+- Hindcast: ERA5-Land hourly reanalysis, Earth Engine `ECMWF/ERA5_LAND/HOURLY`, Copernicus C3S licence.
+- Basin: HydroBASINS v1 level 9, Earth Engine `WWF/HydroSHEDS/v1/Basins/hybas_9`, HydroSHEDS licence.
 
 ## Checks
 
@@ -117,4 +140,8 @@ The script downloads its inputs once into `.cache/` (gitignored) and writes `ele
 npx tsc --noEmit
 npx oxlint app components lib scripts
 npm run build
+node scripts/check-forecast.mjs live        # or replay-2024 / hindcast-2014
+node scripts/check-network.mjs 27
+node scripts/check-hole.mjs
+node scripts/check-sites.mjs 27
 ```

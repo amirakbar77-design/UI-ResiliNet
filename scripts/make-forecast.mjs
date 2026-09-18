@@ -4,6 +4,11 @@
  *
  *   node scripts/make-forecast.mjs
  *
+ * FALLBACK ONLY since Step 16. The app reads real, dated forecasts
+ * (scripts/fetch-weathernext.py, scripts/fetch-replay.py) and opens this file
+ * only if public/forecast-live.json cannot be loaded. Its "catchment mean" is
+ * a tile mean of an invented convective band, not a basin mean.
+ *
  * The pattern is a convective band that forms over the Gunung Stong massif
  * in the south-west, drifts north-east along the Galas valley over about ten
  * hours, peaks around hour 6 at ~60 mm/h in its core, and is followed by a

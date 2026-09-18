@@ -1,8 +1,16 @@
 /**
  * Hourly rain forecast over the terrain AOI and the river-level curve
- * derived from it. The data in `public/forecast.json` is illustrative (see
- * `scripts/make-forecast.mjs`); the model here is deliberately simple and
- * transparent so every number on screen can be traced back to it.
+ * derived from it. Three dated, sourced inputs share this shape and run
+ * through the same model:
+ *
+ *   live          public/forecast-live.json  WeatherNext 3 statistics, newest init (scripts/fetch-weathernext.py)
+ *   replay-2024   public/forecast-2024.json  WeatherNext 2 archive, issue 27 Nov 2024 00Z (scripts/fetch-replay.py)
+ *   hindcast-2014 public/forecast-2014.json  ERA5-Land reanalysis, 22 Dec 2014 06Z + 72 h (scripts/fetch-replay.py)
+ *
+ * The river model is deliberately simple and transparent so every number on
+ * screen can be traced back to it. `public/forecast.json` (illustrative,
+ * scripts/make-forecast.mjs) is kept only as a fallback if the live file is
+ * missing.
  */
 
 // Self-contained on purpose: scripts/check-forecast.mjs imports this module
@@ -23,16 +31,39 @@ export const RECESSION = 0.12;
 /** Hours for rain over the catchment to reach the gauge. Real: time of concentration for the basin. */
 export const LAG_HOURS = 2;
 
+export type ForecastMode = 'live' | 'replay-2024' | 'hindcast-2014';
+export const FORECAST_MODES: ForecastMode[] = ['live', 'replay-2024', 'hindcast-2014'];
+export const FORECAST_FILES: Record<ForecastMode, string> = {
+  live: '/forecast-live.json',
+  'replay-2024': '/forecast-2024.json',
+  'hindcast-2014': '/forecast-2014.json',
+};
+/** The illustrative file, used only when the live file cannot be loaded. */
+const FALLBACK_FILE = '/forecast.json';
+
 export type Forecast = {
   source: string;
+  terms?: string;
+  mode?: ForecastMode;
+  /** Model init (live) or issue/start time (replays), ISO. */
   issuedAt: string;
+  /** Valid time of hour 0, ISO. Live files start at the init's first lead. */
+  validFrom?: string;
   station: string;
   aoi: { west: number; east: number; south: number; north: number };
   grid: { cols: number; rows: number };
   hours: number;
   units?: { rain: string; order: string };
-  /** Catchment-mean rain per hour, mm/h. */
+  /** The basin the catchment mean is taken over. */
+  basin?: { name: string; areaKm2: number | null; source: string };
+  /** Catchment-mean rain per hour, mm/h (ensemble mean where there is an ensemble). */
   catchmentMeanMmPerHour: number[];
+  /** Ensemble spread of the catchment mean, when the source has one. */
+  catchmentMeanQuantiles?: { p10: number[]; p50: number[]; p90: number[] };
+  band?: string;
+  spatial?: string;
+  /** The gauge reading at hour 0, when one was found for the event. */
+  gauge?: { reading: number | null; station?: string; at?: string; note?: string };
   /** rain[hour][row * cols + col], mm/h, row-major with the north row first. */
   rain: number[][];
 };
@@ -47,12 +78,55 @@ export type FloodCurve = {
   peakLevel: () => number;
 };
 
-export async function loadForecast(url = '/forecast.json'): Promise<Forecast> {
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`Failed to load forecast: ${response.status}`);
+/** The river curve run on the ensemble's p10, p50 and p90 rain. */
+export type FloodBand = { p10: FloodCurve; p50: FloodCurve; p90: FloodCurve };
+
+export async function loadForecast(mode: ForecastMode = 'live'): Promise<Forecast> {
+  const response = await fetch(FORECAST_FILES[mode]);
+  if (response.ok) return (await response.json()) as Forecast;
+  if (mode === 'live') {
+    const fallback = await fetch(FALLBACK_FILE);
+    if (fallback.ok) return (await fallback.json()) as Forecast;
   }
-  return (await response.json()) as Forecast;
+  throw new Error(`Failed to load forecast (${mode}): ${response.status}`);
+}
+
+/**
+ * A live file starts at the init's first lead, which is already in the past
+ * by the time it is read. Drop the hours behind `nowMs` so index 0 is "now".
+ * Replays are read at their issue time, so nothing moves.
+ */
+export function alignToNow(forecast: Forecast, nowMs: number): Forecast {
+  if (!forecast.validFrom) return forecast;
+  const offset = Math.floor((nowMs - Date.parse(forecast.validFrom)) / 3_600_000);
+  if (offset <= 0) return forecast;
+  const hours = forecast.hours - offset;
+  // Too stale to trim: show it as issued rather than an empty chart.
+  if (hours < 6) return forecast;
+  const cut = (series: number[]) => series.slice(offset);
+  const q = forecast.catchmentMeanQuantiles;
+  return {
+    ...forecast,
+    hours,
+    validFrom: new Date(Date.parse(forecast.validFrom) + offset * 3_600_000).toISOString(),
+    catchmentMeanMmPerHour: cut(forecast.catchmentMeanMmPerHour),
+    catchmentMeanQuantiles: q ? { p10: cut(q.p10), p50: cut(q.p50), p90: cut(q.p90) } : undefined,
+    rain: forecast.rain.slice(offset),
+  };
+}
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const utcDay = (at: Date) => `${at.getUTCDate()} ${MONTHS[at.getUTCMonth()]}`;
+
+/** Short label for the mode chip: "Live · WeatherNext 3, init 18 Sep 06Z". */
+export function forecastLabel(forecast: Forecast | null, mode: ForecastMode) {
+  const at = forecast ? new Date(forecast.issuedAt) : null;
+  if (mode === 'live') {
+    if (!forecast || !forecast.mode || !at) return 'Live · illustrative fallback';
+    return `Live · WeatherNext 3, init ${utcDay(at)} ${String(at.getUTCHours()).padStart(2, '0')}Z`;
+  }
+  if (mode === 'replay-2024') return `Replay · ${at ? `${utcDay(at)} ${at.getUTCFullYear()}` : '27 Nov 2024'}`;
+  return `Hindcast · ${at ? `${utcDay(at)} ${at.getUTCFullYear()}` : '22 Dec 2014'}`;
 }
 
 /** Rain intensity at a point and (fractional) hour: bilinear in space, linear in time. */
@@ -103,13 +177,9 @@ export function rainAt(
  * rain that fell LAG_HOURS earlier and drains in proportion to how far it
  * sits above BASE_LEVEL. Starts from the observed level at hour 0.
  */
-export function floodCurve(
-  forecast: Forecast,
-  observedLevelMetres: number,
-): FloodCurve {
-  const mean = forecast.catchmentMeanMmPerHour;
+function curveFrom(mean: number[], hours: number, observedLevelMetres: number): FloodCurve {
   const levels: number[] = [clamp(observedLevelMetres, MIN_LEVEL, MAX_LEVEL)];
-  for (let h = 1; h < forecast.hours; h += 1) {
+  for (let h = 1; h < hours; h += 1) {
     const previous = levels[h - 1]!;
     // Rain before "now" is taken to match hour 0, so the lag does not open
     // with an artificial dip.
@@ -138,5 +208,25 @@ export function floodCurve(
     levelAt,
     peakHour,
     peakLevel: () => levels[peakHour()]!,
+  };
+}
+
+/** The river curve on the catchment mean (the ensemble mean where there is one). */
+export function floodCurve(forecast: Forecast, observedLevelMetres: number): FloodCurve {
+  return curveFrom(forecast.catchmentMeanMmPerHour, forecast.hours, observedLevelMetres);
+}
+
+/**
+ * The same model run on the ensemble's p10, p50 and p90 rain, or null when
+ * the source has no spread (a reanalysis). The app plans on p50 and draws
+ * p10–p90 as the band.
+ */
+export function floodBand(forecast: Forecast, observedLevelMetres: number): FloodBand | null {
+  const q = forecast.catchmentMeanQuantiles;
+  if (!q) return null;
+  return {
+    p10: curveFrom(q.p10, forecast.hours, observedLevelMetres),
+    p50: curveFrom(q.p50, forecast.hours, observedLevelMetres),
+    p90: curveFrom(q.p90, forecast.hours, observedLevelMetres),
   };
 }

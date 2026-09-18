@@ -433,6 +433,8 @@ Run forecast:live, both replay fetches, check-forecast on all three files, tsc, 
 
 **If it's not right:** "Plan for the p90 instead", "Band too wide — show p25–p75", "Use total_precipitation instead of the IMERG-calibrated band", or "Cut the live fetch to 24 leads to save time".
 
+**What happened (18 Sep 2026):** built as written, with two deviations. The Earth Engine asset `59572747_4_0` is now marked deprecated and its successor `weathernext_2_0_0_mean` (WeatherNext 2 ensemble mean, 2022 onward, same 6-hourly `total_precipitation_6hr`) covers Nov 2024 with 6-hourly issues, so the replay uses the successor (`--asset` switches back). The gauge readings for 27 Nov 2024 00Z and 22 Dec 2014 06Z were not found; both files say so and the app keeps 27.0 m. Basin means came out at 18 mm/48 h (live, 17 Sep 06Z init; p90 53 mm), 151 mm/72 h (2024) and 119 mm/72 h (2014, ERA5-Land understates the event). With the river constants tuned to the illustrative tile rain, real basin means of 1–4 mm/h raise the modelled river by about 1 m in every mode, so at the 27.0 m default the outage is the same +8 h battery death of the three west sites in all three modes and the plan is unchanged. Step 17 calibrates the constants against 2014 in the open.
+
 ---
 
 ## Step 17 — 2014 hindcast
