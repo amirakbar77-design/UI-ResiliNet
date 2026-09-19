@@ -53,7 +53,7 @@ console.log('\nBASELINE TOP-UPS (local crews, before the access road closes)');
 for (const s of baseline.sites) console.log(`${s.site.name.padEnd(24)} by +${s.accessCutHour} h`);
 if (baseline.sites.length === 0) console.log('(none)');
 console.log(`together keep ${baseline.peopleKept} (union) · residual hole ${hole.count}`);
-console.log('\nCONVOY OPTIONS (one genset trailer from the depot, over roads open at arrival)');
+console.log('\nCONVOY OPTIONS (one genset trailer from the depot; roads open for the whole drive; on site before the battery dies)');
 console.log('site                     by      route   drive  people kept');
 for (const o of convoys) console.log(`${o.site.site.name.padEnd(24)} +${String(o.by).padStart(2)} h  ${(o.routeKm + ' km').padStart(7)}  ${(o.travelHours + ' h').padStart(6)}  ${String(o.peopleKept).padStart(6)}`);
 if (convoys.length === 0) console.log('(none)');

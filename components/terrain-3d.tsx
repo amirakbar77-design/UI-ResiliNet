@@ -9,6 +9,7 @@ import { type Forecast, rainAt } from '@/lib/forecast';
 import { cutMask, type RouteEvaluation } from '@/lib/routing';
 import { type FailureCause, SITE_COVERAGE_RADIUS_METRES, type SiteStatus } from '@/lib/network';
 import { peopleNear } from '@/lib/population';
+import { PORTABLE_MAST_METRES } from '@/lib/sites';
 import type { SiteAssessment } from '@/lib/sites';
 import { viewshedMask, type ViewshedMask } from '@/lib/viewshed';
 
@@ -26,7 +27,6 @@ import {
 } from '@/lib/terrain-field';
 
 const COVERAGE_RADIUS_METRES = 9000;
-const TOWER_MAST_METRES = 32;
 const IDLE_DRIFT_DELAY = 4200;
 const BASE_DAMPING = 0.07; // per 60 Hz frame; rescaled to the real frame time
 const GESTURE_TAIL_MS = 250;
@@ -98,6 +98,8 @@ type SceneHandle = {
   ) => void;
   /** Jumps a running wave to its final state. */
   finishRouteWave: () => void;
+  /** Eases the camera a little toward the depot as the wave sets off. */
+  glideToDepot: () => void;
   /** Raises the mast and permanent coverage at the winning site and glides to it. */
   showWinner: (site: SiteAssessment | null) => void;
   /** Pulses an outline on the site the plan sends the convoy to. */
@@ -143,7 +145,7 @@ function deriveAnchors(terrain: TerrainData): Anchor[] {
       detail: `Elevation: ${meta.towerSite.elevation} m`,
       lon: meta.towerSite.lon,
       lat: meta.towerSite.lat,
-      liftMetres: TOWER_MAST_METRES + 30,
+      liftMetres: PORTABLE_MAST_METRES + 30,
     },
     {
       id: 'depot',
@@ -1069,7 +1071,7 @@ function createScene(
   towerGroup.position.copy(towerBase);
   scene.add(towerGroup);
 
-  const mastHeight = elevationToWorldY(TOWER_MAST_METRES);
+  const mastHeight = elevationToWorldY(PORTABLE_MAST_METRES);
   const mastMaterial = new THREE.MeshStandardMaterial({
     color: 0xe8eef5,
     roughness: 0.45,
@@ -1233,7 +1235,7 @@ function createScene(
     coverageGroup.add(
       buildFan(
         meta.towerSite,
-        viewshedMask(terrain, meta.towerSite, TOWER_MAST_METRES, COVERAGE_RADIUS_METRES),
+        viewshedMask(terrain, meta.towerSite, PORTABLE_MAST_METRES, COVERAGE_RADIUS_METRES),
       ),
     );
   };
@@ -1326,10 +1328,14 @@ function createScene(
     depotBase.z - overviewTarget.z,
   );
   if (awayFromCentre.lengthSq() < 1e-6) awayFromCentre.set(1, 0, -1);
-  awayFromCentre.normalize().setY(0.42).normalize();
+  awayFromCentre.normalize().setY(0.58).normalize();
   const sitePosition = siteTarget
     .clone()
-    .add(awayFromCentre.multiplyScalar(orbitDistance * 1.15));
+    .add(awayFromCentre.multiplyScalar(orbitDistance * 0.95));
+  // Keep the camera over the tile so its edge never enters the frame.
+  const siteMargin = 0.08;
+  sitePosition.x = clamp(sitePosition.x, (-g.extentX / 2) * (1 - siteMargin), (g.extentX / 2) * (1 - siteMargin));
+  sitePosition.z = clamp(sitePosition.z, (-g.extentZ / 2) * (1 - siteMargin), (g.extentZ / 2) * (1 - siteMargin));
 
   const overviewPosition = () => {
     const distance = overviewDistance();
@@ -1411,6 +1417,7 @@ function createScene(
   const updateMarkers = () => {
     const viewWidth = container.clientWidth;
     const viewHeight = container.clientHeight;
+    const placed: { anchor: (typeof anchorPoints)[number]; element: HTMLElement; hidden: boolean; x: number; y: number }[] = [];
     for (const anchor of anchorPoints) {
       const element = markerElements.get(anchor.id);
       if (!element) continue;
@@ -1438,13 +1445,33 @@ function createScene(
           }
         }
       }
+      placed.push({
+        anchor,
+        element,
+        hidden,
+        x: (projected.x * 0.5 + 0.5) * viewWidth,
+        y: (-projected.y * 0.5 + 0.5) * viewHeight,
+      });
+    }
+    // A settlement label gives way to any site, candidate, depot or tower
+    // marker close enough to collide with it: the decision markers win.
+    for (const item of placed) {
+      if (item.hidden || item.anchor.kind !== 'population') continue;
+      for (const other of placed) {
+        if (other.hidden || other.anchor.kind === 'population') continue;
+        if (Math.abs(other.x - item.x) < 110 && Math.abs(other.y - item.y) < 44) {
+          item.hidden = true;
+          break;
+        }
+      }
+    }
+    for (const { element, hidden, x, y } of placed) {
       element.style.visibility = hidden ? 'hidden' : 'visible';
       element.style.opacity = hidden ? '0' : '1';
-      element.style.transform = `translate3d(${
-        (projected.x * 0.5 + 0.5) * viewWidth
-      }px, ${(-projected.y * 0.5 + 0.5) * viewHeight}px, 0)`;
+      element.style.transform = `translate3d(${x}px, ${y}px, 0)`;
     }
   };
+
 
   // --- Frame loop --------------------------------------------------------
   const reduceMotion = globalThis.matchMedia?.(
@@ -1700,6 +1727,9 @@ function createScene(
     const viewWidth = container.clientWidth;
     const viewHeight = Math.max(container.clientHeight, 1);
     camera.aspect = viewWidth / viewHeight;
+    // A portrait phone puts the overview camera far higher than a landscape
+    // screen does; keep the far plane beyond it or the tile goes black.
+    camera.far = Math.max(3000, overviewDistance() * 2.2);
     camera.updateProjectionMatrix();
     renderer.setSize(viewWidth, viewHeight, false);
   };
@@ -1841,6 +1871,29 @@ function createScene(
         fromTarget: controls.target.clone(),
         toPosition,
         toTarget: target,
+        fromSun: sun.intensity,
+        elapsed: 0,
+      };
+    },
+    glideToDepot() {
+      if (view !== 'site' || flight || reduceMotion?.matches) return;
+      const ground = depotBase.clone();
+      ground.y = elevationToWorldY(elevationAt(ground.x, ground.z));
+      const toTarget = controls.target.clone().lerp(ground, 0.35);
+      const toPosition = camera.position.clone().lerp(ground, 0.16);
+      toPosition.y = Math.max(toPosition.y, camera.position.y * 0.92);
+      zoomActive = false;
+      zoomAnchorValid = false;
+      orbitPending = 0;
+      flyPending = 0;
+      lastInteraction = performance.now();
+      controls.enabled = false;
+      flight = {
+        to: 'site',
+        fromPosition: camera.position.clone(),
+        fromTarget: controls.target.clone(),
+        toPosition,
+        toTarget,
         fromSun: sun.intensity,
         elapsed: 0,
       };
@@ -2116,6 +2169,7 @@ export function Terrain3D({
       scene.clearRouteWave();
       return;
     }
+    scene.glideToDepot();
     scene.playRouteWave(routeEvaluation, routeSites, routeNetwork, {
       onProgress: onRouteProgress,
       onDone: onRouteDone,

@@ -122,11 +122,13 @@ export function baselineTopUps(
 
 /**
  * Tier 2a. Convoy options: sites the plan loses to power that no local crew
- * can reach, but the convoy can. A convoy must drive on roads that are still
- * open when it passes, so it is routed over the roads open at its arrival
- * hour rather than the shortest path now — a shortcut that floods within the
- * hour is no shortcut. The latest arrival hour with the drive time inside
- * that window is the "by".
+ * can reach, but the convoy can. The convoy leaves now, so every road on
+ * its way must be open at every hour up to its arrival: it is routed over
+ * the roads open at the highest level between now and then — a road under
+ * water now does not reopen for the plan when the river dips, and a
+ * shortcut that floods within the hour is no shortcut. It must arrive
+ * before the site goes dark and before the planned hour; the latest such
+ * hour with the drive time inside it is the "by".
  */
 export function convoyOptions(
   terrain: TerrainData,
@@ -140,12 +142,16 @@ export function convoyOptions(
   const { graph, meta } = terrain;
   const cells = populatedCells(terrain);
   const toppedUp = new Set(baseline.sites.map((state) => state.id));
+  // Roads open for the whole drive to hour h: open at the highest level
+  // from now to h (a cut is monotone in the level).
   const routeAtHour: Map<number, number>[] = [];
+  let highest = routing.level;
   for (let h = 0; h < routing.levels.length; h += 1) {
-    routeAtHour.push(routeFrom(graph.edges, meta.depot.node, routing.levels[h]!).distance);
+    highest = Math.max(highest, routing.levels[h]!);
+    routeAtHour.push(routeFrom(graph.edges, meta.depot.node, highest).distance);
   }
-  const convoyWindow = (node: number) => {
-    for (let h = routing.levels.length - 1; h >= 1; h -= 1) {
+  const convoyWindow = (node: number, deadline: number) => {
+    for (let h = Math.min(deadline, routing.levels.length - 1); h >= 1; h -= 1) {
       const km = routeAtHour[h]!.get(node);
       if (km === undefined) continue;
       if (km / CONVOY_KMH <= h) return { by: h, km };
@@ -166,7 +172,8 @@ export function convoyOptions(
   for (const state of network.sites) {
     if (state.failureCause !== 'power' || state.failureHour === null) continue;
     if (state.failureHour > plannedHour || toppedUp.has(state.id)) continue;
-    const window = convoyWindow(state.site.accessNode);
+    // On site before the battery runs out, and before the hour the plan is judged at.
+    const window = convoyWindow(state.site.accessNode, Math.min(plannedHour, state.failureHour));
     if (!window) continue; // no road stays open long enough for the drive
     // A generator on site with fuel for days keeps it up through the horizon.
     options.push({

@@ -487,6 +487,8 @@ Build a Method panel behind the "Method library" rail icon (desktop: a wide glas
 
 **You should see:** one panel that answers "what's real?" in under a minute; no dead icons.
 
+**What happened (19 Sep 2026):** `components/method-panel.tsx` behind the book icon (desktop: a wide glass sheet beside the rail; phone: full screen, also from the dock). Four tables and a line: real data (nine sources with licence and vintage), the one synthetic input, derived (nine one-liners), assumptions (fifteen constants with value and provenance), seeds (none in this bake), then the December 2014 check with a button that switches to the hindcast. `lib/method.ts` builds the rows from the exported constants; `lib/gauge.ts` now holds the danger level and the gauge mapping for the dashboard, the hindcast and the sheet; the bake writes its candidate and site selection rules into `terrain.json` as `rules`, so the sheet quotes the bake's real values. Rail: two icons, both alive (layers, method); Overview, Operator profile, Settings and Sign out are gone.
+
 ---
 
 ## Step 19 — Cleanup and rehearsal fixes
@@ -500,5 +502,9 @@ Polish pass before the freeze: settlement pins must not overlap site or winner m
 ```
 
 **You should see:** the same three screens, calmer; the timeline plays itself once; nothing overlaps.
+
+**Rehearsal fix (20 Sep 2026):** at 30.2 m and above the card recommended a generator run to Manek Urai N "by +23 h" while every road on the map was cut. The convoy was routed over roads open at its arrival hour, and once the design storm passed the river dipped below today's level and cut roads counted as reopened; nothing checked that the convoy arrived before the site went dark (+8 h) or before the planned hour (+13 h). Now the convoy drives on roads open for the whole trip (the highest level between now and arrival) and must be on site before the battery dies and before the planned hour. 27 m and 28 m plans unchanged; from 30 m the card says no convoy or portable tower can reach the valley in time.
+
+**What happened (19 Sep 2026):** settlement labels now yield to any site, candidate, depot or tower marker within 110 × 44 px of them (`updateMarkers`); the Site camera is steeper, closer and clamped over the tile so the edge never shows, and `glideToDepot()` eases it toward the depot when Start is pressed; the Forecast timeline plays itself once per event from hour 0 (about eight seconds whatever the horizon, clocked on wall time so slow frames skip ahead) and settles on the planning hour — the outage hour, or the peak when nothing fails — with reduced motion honoured; the camera far plane follows the overview distance, which fixed a black overview on portrait phones; the timeline header drops the source label and stacks its readout above the buttons on phones. Timed headless run on software GL: card at 64 s with no console errors (real hardware is faster). The winner card already listed two runners-up one line each.
 
 **After Step 19 — freeze.** Deploy the static build, write the three-minute script around one sentence — *this is when your network dies, and what to do about it* — rehearse with a stopwatch, drill the questions (where are the towers, why this site, what is real), and cut anything that does not survive rehearsal.

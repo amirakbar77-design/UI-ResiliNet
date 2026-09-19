@@ -1444,6 +1444,24 @@ async function main() {
       note: 'illustrative: drawn for the 3D view only; every count uses population',
     },
     population,
+    // The selection rules, so the method panel quotes the real values.
+    rules: {
+      candidates: {
+        maxSlopeDeg: CANDIDATE_MAX_SLOPE_DEG,
+        maxRoadMetres: CANDIDATE_MAX_ROAD_METRES,
+        minHandDm: CANDIDATE_MIN_HAND_DM,
+        spacingMetres: CANDIDATE_SPACING_METRES,
+        count: CANDIDATE_COUNT,
+      },
+      sites: {
+        clusterMetres: SITE_CELL_CLUSTER_METRES,
+        minCells: SITE_MIN_CELLS,
+        minOperators: SITE_MIN_OPERATORS,
+        minSpacingMetres: SITE_SPACING_METRES,
+        maxCount: SITE_MAX_COUNT,
+        snapMetres: SITE_SNAP_METRES,
+      },
+    },
     attribution: [
       'Elevation: NASA SRTM 1 arc-second (AWS Open Data elevation-tiles-prod)',
       'Imagery: Sentinel-2 cloudless 2020 by EOX IT Services, CC BY 4.0 (ESA Copernicus)',

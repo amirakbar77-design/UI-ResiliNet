@@ -6,6 +6,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   useSyncExternalStore,
   type ComponentType,
@@ -16,19 +17,15 @@ import {
   Check,
   ChevronDown,
   ChevronLeft,
-  Home,
   Layers3,
-  LogOut,
   MapPin,
   Pause,
   Play,
   RadioTower,
   RotateCcw,
   Route,
-  Settings,
   ShieldCheck,
   Signal,
-  UserRound,
   Users,
   Waves,
   X,
@@ -37,6 +34,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Slider } from '@/components/ui/slider';
 import { Switch } from '@/components/ui/switch';
+import { MethodPanel } from '@/components/method-panel';
 import type { RouteRun, SiteMarkerState, View } from '@/components/terrain-3d';
 import {
   alignToNow,
@@ -61,6 +59,7 @@ import {
   type SiteStatus,
   siteViewsheds,
 } from '@/lib/network';
+import { GAUGE_DANGER, GAUGE_RECORD_2014, gaugeToHandLevel } from '@/lib/gauge';
 import { baselineTopUps, convoyOptions, type Plan, recommendPlans, type Recommendation } from '@/lib/recommend';
 import { evaluateRoutes, type RouteEvaluation } from '@/lib/routing';
 import { assessSites, type SiteAssessment } from '@/lib/sites';
@@ -91,14 +90,6 @@ const layerOptions: Array<{
   { key: 'population', label: 'Settlements & Homes', icon: Users },
 ];
 
-const utilityItems: Array<{ label: string; icon: IconComponent }> = [
-  { label: 'Overview', icon: Home },
-  { label: 'Map layers', icon: Layers3 },
-  { label: 'Operator profile', icon: UserRound },
-  { label: 'Method library', icon: BookOpen },
-  { label: 'Settings', icon: Settings },
-];
-
 type Stage = 'now' | 'forecast' | 'site';
 
 // Kuala Krai gauge (Sungai Kelantan), metres above gauge datum. Danger level
@@ -107,8 +98,6 @@ type Stage = 'now' | 'forecast' | 'site';
 const GAUGE_MIN = 20;
 const GAUGE_MAX = 34;
 const GAUGE_STEP = 0.1;
-const GAUGE_DANGER = 25;
-const GAUGE_RECORD_2014 = 34.2;
 const GAUGE_DEFAULT = 27;
 
 /**
@@ -152,13 +141,6 @@ function clockLabel(now: number | null, hoursAhead = 0) {
   return clockFormat.format(new Date(now + hoursAhead * 3_600_000));
 }
 
-/**
- * Illustrative mapping from the gauge reading to the scene's HAND threshold:
- * every metre above danger level is taken as a metre of water above the
- * drainage datum across the valley. A real deployment would replace this
- * with a rating curve per reach.
- */
-const gaugeToHandLevel = (gauge: number) => clamp(gauge - GAUGE_DANGER, 0.5, 14);
 
 const stages: Array<{
   key: Stage;
@@ -295,59 +277,52 @@ function TopBar({
   );
 }
 
-function UtilityRail() {
+/** Two icons: the layer panel that is already open, and the method sheet. */
+function UtilityRail({ methodOpen, onOpenMethod }: { methodOpen: boolean; onOpenMethod: () => void }) {
   return (
     <nav
       aria-label="Dashboard tools"
-      className="fixed bottom-0 left-0 top-14 z-40 hidden w-14 flex-col items-center border-r border-slate-600/40 bg-[#07111b]/94 py-3 backdrop-blur-xl md:flex"
+      className="fixed bottom-0 left-0 top-14 z-40 hidden w-14 flex-col items-center gap-2 border-r border-slate-600/40 bg-[#07111b]/94 py-3 backdrop-blur-xl md:flex"
     >
-      <div className="flex w-full flex-1 flex-col items-center gap-2">
-        {utilityItems.map(({ label, icon: Icon }, index) => (
-          <button
-            key={label}
-            type="button"
-            aria-label={label}
-            aria-current={index === 1 ? 'page' : undefined}
-            className={`grid size-10 place-items-center rounded-lg border transition-colors ${
-              index === 1
-                ? 'border-sky-400/20 bg-sky-400/12 text-sky-300'
-                : 'border-transparent text-slate-400 hover:bg-slate-800/80 hover:text-white'
-            }`}
-          >
-            <Icon className="size-[18px]" aria-hidden />
-          </button>
-        ))}
-      </div>
+      <span
+        aria-label="Map layers"
+        title="Map layers"
+        className="grid size-10 place-items-center rounded-lg border border-sky-400/20 bg-sky-400/12 text-sky-300"
+      >
+        <Layers3 className="size-[18px]" aria-hidden />
+      </span>
       <button
         type="button"
-        aria-label="Sign out"
-        className="grid size-10 place-items-center rounded-lg text-slate-500 transition-colors hover:bg-red-400/10 hover:text-red-300"
+        aria-label="Method"
+        title="Method: what is real, derived, assumed"
+        aria-pressed={methodOpen}
+        onClick={onOpenMethod}
+        className={`grid size-10 place-items-center rounded-lg border transition-colors ${
+          methodOpen
+            ? 'border-sky-400/20 bg-sky-400/12 text-sky-300'
+            : 'border-transparent text-slate-400 hover:bg-slate-800/80 hover:text-white'
+        }`}
       >
-        <LogOut className="size-[18px]" aria-hidden />
+        <BookOpen className="size-[18px]" aria-hidden />
       </button>
     </nav>
   );
 }
 
-function MobileDock({ onOpenAnalysis }: { onOpenAnalysis: () => void }) {
+function MobileDock({ onOpenAnalysis, onOpenMethod }: { onOpenAnalysis: () => void; onOpenMethod: () => void }) {
   return (
     <nav
       aria-label="Dashboard tools"
       className="fixed inset-x-2 bottom-2 z-50 flex h-14 items-center justify-around rounded-2xl border border-slate-600/45 bg-[#07111b]/94 px-2 shadow-2xl backdrop-blur-xl md:hidden"
     >
-      {utilityItems.slice(0, 4).map(({ label, icon: Icon }, index) => (
-        <button
-          key={label}
-          type="button"
-          aria-label={label}
-          aria-current={index === 1 ? 'page' : undefined}
-          className={`grid size-11 place-items-center rounded-xl ${
-            index === 1 ? 'bg-sky-400/12 text-sky-300' : 'text-slate-400'
-          }`}
-        >
-          <Icon className="size-5" aria-hidden />
-        </button>
-      ))}
+      <button
+        type="button"
+        aria-label="Method"
+        onClick={onOpenMethod}
+        className="grid size-11 place-items-center rounded-xl text-slate-300"
+      >
+        <BookOpen className="size-5" aria-hidden />
+      </button>
       <button
         type="button"
         aria-label="Open intervention analysis"
@@ -702,6 +677,8 @@ function ForecastTimeline({
   sourceLabel,
   hour,
   setHour,
+  autoplay,
+  onSettle,
   now,
   floor,
   network,
@@ -715,13 +692,21 @@ function ForecastTimeline({
   sourceLabel: string;
   hour: number;
   setHour: (hour: number) => void;
+  /** Play from now to the end once, the first time the stage opens. */
+  autoplay: boolean;
+  /** Called when that first run ends: the parent drops back to its planning hour. */
+  onSettle: () => void;
   now: number | null;
   /** Level the river is at right now, from the gauge. */
   floor: number;
   network: NetworkAssessment | null;
   onNext: () => void;
 }) {
-  const [playing, setPlaying] = useState(false);
+  // The opening run is the stage introducing itself: it starts playing at
+  // mount (the parent has put the hour at 0), runs quicker, and settles on
+  // the planning hour instead of stopping at the end.
+  const [playing, setPlaying] = useState(autoplay);
+  const [auto, setAuto] = useState(autoplay);
   const maxHour = forecast.hours - 1;
   const plotW = CHART_W - CHART_ML - CHART_MR;
   const plotH = CHART_H - CHART_MT - CHART_MB;
@@ -761,17 +746,40 @@ function ForecastTimeline({
     (forecast.catchmentMeanMmPerHour[h1] ?? 0) * (hour - h0);
   const isPlaying = playing && hour < maxHour;
 
-  // Playback advances a quarter hour at a time and simply stops at the end.
+  // Playback is clocked on wall time, so a slow frame skips ahead rather
+  // than stretching the run: a manual run moves 2 h/s and stops at the end;
+  // the opening run takes about eight seconds whatever the horizon, then
+  // hands the hour back to the parent's planning default.
+  const playOrigin = useRef<{ at: number; hour: number } | null>(null);
   useEffect(() => {
-    if (!playing || hour >= maxHour) return;
-    const id = setTimeout(
-      () => setHour(Math.min(maxHour, hour + HOUR_STEP)),
-      1000 / (PLAY_HOURS_PER_SECOND / HOUR_STEP),
-    );
+    if (!playing || hour >= maxHour) {
+      playOrigin.current = null;
+      return;
+    }
+    const hoursPerSecond = auto ? Math.max(PLAY_HOURS_PER_SECOND, maxHour / 8) : PLAY_HOURS_PER_SECOND;
+    playOrigin.current ??= { at: performance.now(), hour };
+    const origin = playOrigin.current;
+    const id = setTimeout(() => {
+      const elapsed = (performance.now() - origin.at) / 1000;
+      const due = Math.round((origin.hour + elapsed * hoursPerSecond) / HOUR_STEP) * HOUR_STEP;
+      const next = Math.min(maxHour, Math.max(due, hour + HOUR_STEP));
+      if (next < maxHour) {
+        setHour(next);
+        return;
+      }
+      setPlaying(false);
+      if (auto) {
+        setAuto(false);
+        onSettle();
+      } else {
+        setHour(next);
+      }
+    }, 1000 / (hoursPerSecond / HOUR_STEP));
     return () => clearTimeout(id);
-  }, [playing, hour, maxHour, setHour]);
+  }, [playing, hour, maxHour, setHour, auto, onSettle]);
 
   const pick = (next: number) => {
+    setAuto(false);
     setPlaying(false);
     setHour(next);
   };
@@ -819,9 +827,9 @@ function ForecastTimeline({
       className="glass-panel absolute inset-x-3 bottom-[76px] z-30 rounded-xl p-3 md:bottom-6 md:left-16 md:right-auto md:w-[min(760px,calc(100vw-470px))] md:min-w-[360px] md:p-4"
     >
       <div className="flex flex-wrap items-center gap-2">
-        <div className="min-w-0 flex-1">
+        <div className="min-w-0 basis-full md:flex-1 md:basis-auto">
           <p className="truncate text-[11px] font-semibold tracking-[0.1em] text-slate-400 uppercase">
-            River forecast · {sourceLabel}
+            River forecast<span className="hidden md:inline"> · {sourceLabel}</span>
           </p>
           <p
             className="mt-0.5 text-sm font-semibold text-white tabular-nums"
@@ -859,6 +867,7 @@ function ForecastTimeline({
           type="button"
           size="icon-lg"
           onClick={() => {
+            setAuto(false);
             if (isPlaying) {
               setPlaying(false);
               return;
@@ -1588,6 +1597,9 @@ export function ResilinetDashboard() {
   const [analysisOpen, setAnalysisOpen] = useState(true);
   const [resetSignal, setResetSignal] = useState(0);
   const [mobileAnalysisOpen, setMobileAnalysisOpen] = useState(false);
+  const [methodOpen, setMethodOpen] = useState(false);
+  // The forecast plays itself the first time the stage opens for an event.
+  const [forecastPlayed, setForecastPlayed] = useState(false);
 
   const onLayerChange = (key: LayerKey, value: boolean) => {
     setLayers((current) => ({ ...current, [key]: value }));
@@ -1618,6 +1630,7 @@ export function ResilinetDashboard() {
         setChosenHour(null);
         setRoute(null);
         setSiteOverrides({});
+        setForecastPlayed(false);
       },
       (error: unknown) => console.error('Failed to load forecast', error),
     );
@@ -1703,9 +1716,14 @@ export function ResilinetDashboard() {
   // so the route wave starts in the foreground and runs away down the valley.
   const view: View =
     stage === 'forecast' ? 'overview' : stage === 'site' ? 'site' : 'ground';
+  // The forecast stage plays itself the first time it opens for an event,
+  // from hour 0, unless the viewer prefers reduced motion.
+  const reduceMotion = () => globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
+  const autoplayForecast = !forecastPlayed && !reduceMotion();
   // Leaving the site stage discards its route evaluation.
   const changeStage = (next: Stage) => {
     if (next !== 'site') setRoute(null);
+    if (next === 'forecast' && autoplayForecast) setChosenHour(0);
     setStage(next);
   };
   const onNext = () => changeStage(stage === 'now' ? 'forecast' : 'site');
@@ -1794,6 +1812,10 @@ export function ResilinetDashboard() {
       recommendation,
     }));
   };
+  const onForecastSettle = useCallback(() => {
+    setForecastPlayed(true);
+    setChosenHour(null);
+  }, []);
   const onSkipRoutes = () =>
     setRoute((current) => (current ? { ...current, skip: true } : current));
   const onRouteProgress = useCallback(
@@ -1901,7 +1923,7 @@ export function ResilinetDashboard() {
         resetSignal={resetSignal}
       />
       <TopBar stage={stage} setStage={changeStage} />
-      <UtilityRail />
+      <UtilityRail methodOpen={methodOpen} onOpenMethod={() => setMethodOpen(true)} />
       <LayerPanel layers={layers} onLayerChange={onLayerChange} />
       {stage === 'forecast' && forecast && curve && (
         <ForecastTimeline
@@ -1911,6 +1933,8 @@ export function ResilinetDashboard() {
           sourceLabel={forecastLabel(forecast, mode)}
           hour={forecastHour}
           setHour={setChosenHour}
+          autoplay={autoplayForecast}
+          onSettle={onForecastSettle}
           now={now}
           floor={gaugeToHandLevel(gauge)}
           network={network}
@@ -1946,11 +1970,22 @@ export function ResilinetDashboard() {
         onOpen={() => setAnalysisOpen(true)}
       />
       <MobileControls layers={layers} onLayerChange={onLayerChange} />
-      <MobileDock onOpenAnalysis={() => setMobileAnalysisOpen(true)} />
+      <MobileDock onOpenAnalysis={() => setMobileAnalysisOpen(true)} onOpenMethod={() => setMethodOpen(true)} />
       <MobileAnalysis
         {...stageProps}
         open={mobileAnalysisOpen}
         onClose={() => setMobileAnalysisOpen(false)}
+      />
+      <MethodPanel
+        open={methodOpen}
+        onClose={() => setMethodOpen(false)}
+        terrain={terrain}
+        siteMasks={siteMasks}
+        forecast={rawForecast}
+        onOpenHindcast={() => {
+          setMode('hindcast-2014');
+          setMethodOpen(false);
+        }}
       />
 
       <div className="absolute bottom-6 right-[362px] z-20 hidden items-center gap-2 xl:flex">

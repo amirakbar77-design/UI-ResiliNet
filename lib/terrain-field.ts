@@ -126,6 +126,11 @@ export type TerrainMeta = {
   houses: { file: string; count: number };
   /** WorldPop people per render cell. */
   population: { file: string; total: number; max: number; cells: number; source: string };
+  /** The bake's selection rules, written by scripts/bake-terrain.mjs so the method panel quotes the real values. */
+  rules?: {
+    candidates: { maxSlopeDeg: number; maxRoadMetres: number; minHandDm: number; spacingMetres: number; count: number };
+    sites: { clusterMetres: number; minCells: number; minOperators: number; minSpacingMetres: number; maxCount: number; snapMetres: number };
+  };
   attribution: string[];
 };
 

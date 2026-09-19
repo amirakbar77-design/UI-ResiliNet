@@ -15,7 +15,9 @@ export const BACKHAUL_RANGE_METRES = 15_000;
 /** An existing site the portable mast could link to by microwave, nearest first. */
 export type BackhaulOption = { siteId: string; km: number };
 /** Clearance the backhaul ray must keep above the ground between the two masts. */
-const BACKHAUL_CLEARANCE_METRES = 5;
+export const BACKHAUL_CLEARANCE_METRES = 5;
+/** The portable tower's mast, metres. */
+export const PORTABLE_MAST_METRES = 32;
 
 export type SiteAssessment = {
   /** Matches the scene's candidate marker id. */
@@ -48,7 +50,7 @@ export function assessSites(
   hole: Uint8Array,
   /** Existing sites a mast could link to — live now or keepable; the plan decides which count. */
   linkableSites: Site[],
-  mastMetres = 32,
+  mastMetres = PORTABLE_MAST_METRES,
   radiusMetres = 9000,
 ): SiteAssessment[] {
   const cells = populatedCells(terrain);

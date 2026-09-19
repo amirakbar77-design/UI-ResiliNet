@@ -5,13 +5,12 @@
  * Shared by the Now-stage block in Hindcast mode and scripts/check-hindcast.mjs.
  */
 
+import { GAUGE_DANGER } from './gauge.ts';
 import type { NetworkAssessment, NetworkSiteState } from './network.ts';
 import { edgeCutAt, routeFrom } from './routing.ts';
 import { metresPerDegreeLon, type TerrainData } from './terrain-field.ts';
 import type { ViewshedMask } from './viewshed.ts';
 
-/** JPS danger level at Kuala Krai; the gauge-to-HAND mapping subtracts it. */
-const DANGER_LEVEL_M = 25;
 /** Rail bridges this close to the Kemubu place node are "the Kemubu bridge". */
 const BRIDGE_SEARCH_M = 1500;
 /** Sites this close to the Kuala Krai town node are "the town sites". */
@@ -43,7 +42,7 @@ export type HindcastCheck = {
 const metresBetween = (aLon: number, aLat: number, bLon: number, bLat: number) =>
   Math.hypot((aLon - bLon) * metresPerDegreeLon((aLat + bLat) / 2), (aLat - bLat) * 110_574);
 
-const gaugeOf = (level: number) => (DANGER_LEVEL_M + level).toFixed(1);
+const gaugeOf = (level: number) => (GAUGE_DANGER + level).toFixed(1);
 
 const fate = (state: NetworkSiteState) =>
   state.status === 'down'
