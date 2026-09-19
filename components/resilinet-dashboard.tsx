@@ -1420,6 +1420,8 @@ type RouteState = {
   evaluation: RouteEvaluation;
   status: 'running' | 'done';
   skip: boolean;
+  /** A re-plan after the officer's report: shown at once, no wave. */
+  instant: boolean;
   /** Live figures while the wave plays. */
   reachableKm: number;
   cuts: number;
@@ -1682,7 +1684,6 @@ export function ResilinetDashboard() {
     [terrain, network, siteMasks, forecastHour],
   );
   const hole = planning?.hole ?? null;
-  const baseline = planning?.baseline ?? null;
   const siteStates = useMemo(() => {
     const states: Record<string, SiteMarkerState> = {};
     for (const s of network?.sites ?? []) {
@@ -1695,16 +1696,11 @@ export function ResilinetDashboard() {
     }
     return states;
   }, [network]);
-  const onSiteTap = useCallback((id: string) => {
-    setSiteOverrides((current) => {
-      const order: (SiteStatus | undefined)[] = [undefined, 'up', 'battery', 'down'];
-      const next = order[(order.indexOf(current[id]) + 1) % order.length];
-      const copy = { ...current };
-      if (next === undefined) delete copy[id];
-      else copy[id] = next;
-      return copy;
-    });
-  }, []);
+  // The latest route, for the tap handler to know whether a plan is on screen.
+  const routeRef = useRef<RouteState | null>(null);
+  useEffect(() => {
+    routeRef.current = route;
+  }, [route]);
 
   // Now floods from the gauge; Forecast and Site from the curve at the chosen
   // hour (falling back to the gauge if the forecast file is unavailable).
@@ -1734,8 +1730,15 @@ export function ResilinetDashboard() {
     return names;
   }, [terrain]);
   const routesReady = terrain !== null && curve !== null && hole !== null;
-  const onStartRoutes = () => {
-    if (!terrain || !curve || !hole || !baseline || !network || !siteMasks) return;
+  /**
+   * The whole evaluation for one network state: the route wave, the
+   * baseline top-ups, the convoy options, the candidates that have a link,
+   * and the ranked plans. Used by Start and by a re-plan after a report.
+   */
+  const buildPlan = (state: NetworkAssessment) => {
+    if (!terrain || !curve || !siteMasks) return null;
+    const { baseline, hole } = baselineTopUps(terrain, state, siteMasks, forecastHour);
+    const network = state;
     const evaluation = evaluateRoutes(
       terrain.graph,
       terrain.meta.depot.node,
@@ -1794,23 +1797,62 @@ export function ResilinetDashboard() {
     );
     const failures: Record<string, number | null> = {};
     for (const s of network.sites) failures[s.id] = s.failureHour;
+    return { evaluation, sites: sitesForMap, recommendation, failures, hole };
+  };
+  const onStartRoutes = () => {
+    if (!network) return;
+    const plan = buildPlan(network);
+    if (!plan) return;
     setRoute((current) => ({
       id: (current?.id ?? 0) + 1,
-      evaluation,
+      evaluation: plan.evaluation,
       status: 'running',
       skip: false,
+      instant: false,
       reachableKm: 0,
       cuts: 0,
-      sites: sitesForMap,
+      sites: plan.sites,
       spawned: [],
       sitesDone: false,
       // The map's winner is the tower in the best plan, if the plan has one.
-      winnerId: recommendation.best?.portable?.site.id ?? null,
+      winnerId: plan.recommendation.best?.portable?.site.id ?? null,
       previewId: null,
-      withoutSignal: hole.count,
-      network: { failures, plannedHour: forecastHour },
-      recommendation,
+      withoutSignal: plan.hole.count,
+      network: { failures: plan.failures, plannedHour: forecastHour },
+      recommendation: plan.recommendation,
     }));
+  };
+  // Tapping a site marker is the officer's report: the first tap says it is
+  // down, the next that it is fine (it has fuel), then on battery, then back
+  // to the model. Once a plan is on screen, a report re-plans at once.
+  const onSiteTap = (id: string) => {
+    const order: (SiteStatus | undefined)[] = [undefined, 'down', 'up', 'battery'];
+    const next = order[(order.indexOf(siteOverrides[id]) + 1) % order.length];
+    const overrides = { ...siteOverrides };
+    if (next === undefined) delete overrides[id];
+    else overrides[id] = next;
+    setSiteOverrides(overrides);
+    const current = routeRef.current;
+    if (!current?.sitesDone || !terrain || !curve) return;
+    const plan = buildPlan(assessNetwork(terrain, curve, overrides));
+    if (!plan) return;
+    setRoute({
+      id: current.id + 1,
+      evaluation: plan.evaluation,
+      status: 'done',
+      skip: true,
+      instant: true,
+      reachableKm: current.reachableKm,
+      cuts: current.cuts,
+      sites: plan.sites,
+      spawned: plan.sites.map((s) => s.id),
+      sitesDone: true,
+      winnerId: plan.recommendation.best?.portable?.site.id ?? null,
+      previewId: null,
+      withoutSignal: plan.hole.count,
+      network: { failures: plan.failures, plannedHour: forecastHour },
+      recommendation: plan.recommendation,
+    });
   };
   const onForecastSettle = useCallback(() => {
     setForecastPlayed(true);
@@ -1866,6 +1908,7 @@ export function ResilinetDashboard() {
             sites: route.sites,
             network: route.network,
             skip: route.skip,
+            instant: route.instant,
           }
         : null,
     [route],

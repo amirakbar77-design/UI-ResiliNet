@@ -203,11 +203,11 @@ export function assessNetwork(
         failureCause = 'manual';
       }
     } else if (override === 'up') {
+      // The officer says it is fine — a genset with fuel, a crew on site.
+      // It survives the horizon.
       status = 'up';
-      if (failureHour !== null && failureHour <= 0) {
-        failureHour = null;
-        failureCause = null;
-      }
+      failureHour = null;
+      failureCause = null;
     }
     return {
       id: site.id,
@@ -283,7 +283,9 @@ export function coverageHole(
   alsoLive: string[] = [],
 ): CoverageHole {
   const cells = populatedCells(terrain);
-  const now = coverageAt(masks, network.liveAt(0));
+  // The network as built, every site up: a site the officer reports down
+  // adds its people to the hole rather than dropping them out of it.
+  const now = coverageAt(masks, network.sites.map((s) => s.id));
   const later = coverageAt(masks, [...network.liveAt(hour), ...alsoLive]);
   const mask = new Uint8Array(cells.count);
   let people = 0;

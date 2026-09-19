@@ -2031,6 +2031,8 @@ export type RouteRun = {
   network: RouteNetwork;
   /** True once the officer asked to skip the animation. */
   skip: boolean;
+  /** A re-plan after the officer's report: drawn in its final state at once. */
+  instant: boolean;
 };
 
 export type RouteNetwork = {
@@ -2162,6 +2164,7 @@ export function Terrain3D({
   const routeEvaluation = routeRun?.evaluation ?? null;
   const routeSites = routeRun?.sites ?? null;
   const routeNetwork = routeRun?.network ?? null;
+  const routeInstant = routeRun?.instant ?? false;
   useEffect(() => {
     const scene = sceneRef.current;
     if (!scene) return;
@@ -2169,17 +2172,21 @@ export function Terrain3D({
       scene.clearRouteWave();
       return;
     }
-    scene.glideToDepot();
+    // A re-plan after a report keeps the camera where the officer left it
+    // and shows the new plan at once; a fresh Start plays the wave.
+    if (!routeInstant) scene.glideToDepot();
     scene.playRouteWave(routeEvaluation, routeSites, routeNetwork, {
       onProgress: onRouteProgress,
       onDone: onRouteDone,
       onSiteSpawn,
       onSitesDone,
     });
+    if (routeInstant) scene.finishRouteWave();
   }, [
     routeEvaluation,
     routeSites,
     routeNetwork,
+    routeInstant,
     onRouteProgress,
     onRouteDone,
     onSiteSpawn,
@@ -2334,8 +2341,8 @@ export function Terrain3D({
                     <button
                       type="button"
                       onClick={() => onSiteTap(anchor.id)}
-                      title={`${anchor.label} · ${status}${state?.manual ? ' (manual)' : ''} · ${why}${topUpIds.includes(anchor.id) ? ' · topped up by a local crew in the plan' : ''}${anchor.detail === 'placeholder site' ? ' · placeholder site' : ''}`}
-                      aria-label={`${anchor.label}, ${status}${state?.manual ? ', manual override' : ''}; tap to change`}
+                      title={`${anchor.label} · ${status}${state?.manual ? ' (reported)' : ''} · ${why}${topUpIds.includes(anchor.id) ? ' · topped up by a local crew in the plan' : ''}${anchor.detail === 'placeholder site' ? ' · placeholder site' : ''}`}
+                      aria-label={`${anchor.label}, ${status}${state?.manual ? ', reported by the officer' : ''}; tap to report a change`}
                       className="pointer-events-auto flex -translate-x-1/2 -translate-y-full cursor-pointer flex-col items-center"
                     >
                       <span
@@ -2349,7 +2356,7 @@ export function Terrain3D({
                       >
                         {anchor.label}
                         {state?.manual && (
-                          <span className="ml-1 rounded bg-sky-400/20 px-1 font-normal text-sky-200">manual</span>
+                          <span className="ml-1 rounded bg-sky-400/20 px-1 font-normal text-sky-200">reported</span>
                         )}
                         {topUpIds.includes(anchor.id) && (
                           <span className="ml-1 rounded bg-emerald-400/20 px-1 font-normal text-emerald-200">top-up</span>

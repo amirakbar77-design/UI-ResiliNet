@@ -33,7 +33,7 @@ const masks = siteViewsheds(terrain);
 const gauges = process.argv.slice(2).map(Number).filter(Number.isFinite);
 if (gauges.length === 0) gauges.push(26, 26.5, 27, 28, 30, 32);
 console.log(`population ${meta.population.total.toLocaleString()} people · illustrative houses ${meta.houses.count.toLocaleString()}`);
-console.log('gauge   HAND   river peak   outage    dark@outage   covered now   without signal @outage   homes now   homes without signal');
+console.log('gauge   HAND   river peak   outage    dark@outage   covered as built   without signal @outage   homes now   homes without signal');
 const homesHole = (network, hour) => {
   const now = coverageAt(masks, network.liveAt(0));
   const later = coverageAt(masks, network.liveAt(hour));

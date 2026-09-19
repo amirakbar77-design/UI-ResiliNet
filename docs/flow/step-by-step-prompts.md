@@ -508,3 +508,21 @@ Polish pass before the freeze: settlement pins must not overlap site or winner m
 **What happened (19 Sep 2026):** settlement labels now yield to any site, candidate, depot or tower marker within 110 × 44 px of them (`updateMarkers`); the Site camera is steeper, closer and clamped over the tile so the edge never shows, and `glideToDepot()` eases it toward the depot when Start is pressed; the Forecast timeline plays itself once per event from hour 0 (about eight seconds whatever the horizon, clocked on wall time so slow frames skip ahead) and settles on the planning hour — the outage hour, or the peak when nothing fails — with reduced motion honoured; the camera far plane follows the overview distance, which fixed a black overview on portrait phones; the timeline header drops the source label and stacks its readout above the buttons on phones. Timed headless run on software GL: card at 64 s with no console errors (real hardware is faster). The winner card already listed two runners-up one line each.
 
 **After Step 19 — freeze.** Deploy the static build, write the three-minute script around one sentence — *this is when your network dies, and what to do about it* — rehearse with a stopwatch, drill the questions (where are the towers, why this site, what is real), and cut anything that does not survive rehearsal.
+
+---
+
+## Step 20 — The report
+
+**Goal:** the judge sees the system re-decide, not recite.
+
+**Why:** with the default inputs the answer is always the convoy to Kuala Balah and the portable tower at Bukit Bedak, because the three upper-valley sites lose their fuel road at hour 0 at every gauge and the residual hole is always the upper valley. That is the valley's answer, and an operator would pre-plan it. But a system whose output never moves cannot be told from a lookup. The officer's real-time input during a flood is the operator's report — "this site is under water" — and the plan must move when it arrives.
+
+**Prompt**
+
+```
+Make the site-marker tap the officer's report and make the plan follow it. First tap = down (the common report), then up = fine (it has fuel: survives the horizon), then battery, then back to the model; tag it "reported". Count the coverage hole from the network as built (every site's viewshed), not from "live now", so a reported-down site adds its people to the hole instead of dropping them out of it. Once a plan is on screen, a report re-plans at once: same route wave, new baseline, convoys, candidates and ranking, drawn in their final state without replaying the animation and without moving the camera. README and the method sheet say so. tsc, oxlint, build; a headless run that taps Kuala Balah after the evaluation.
+```
+
+**You should see:** at 27 m, Start gives Kuala Balah + Bukit Bedak (8,604); tap Kuala Balah once and within a second the card reads Jelawang convoy + Jelawang tower (5,141), the mast and the dashed link move, and Kuala Balah's marker is red with "reported". Tap again ("fine, it has fuel") and the hole drops to 6,336 with the convoy freed for Jelawang.
+
+**In the script:** show the plan; "the operator just called, Kuala Balah is under water"; tap; the plan moves; "it does not have a fixed answer, it has a fixed way of thinking".

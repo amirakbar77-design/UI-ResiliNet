@@ -55,8 +55,8 @@ export function methodSections(meta: TerrainMeta | null, live: Forecast | null):
     ['Route wave', 'Dijkstra from the Kuala Krai depot over roads not cut; closing hours read off the forecast', 'lib/routing'],
     ['Viewshed', `line of sight from the mast over SRTM, ${VIEWSHED_SPOKES} spokes × ${VIEWSHED_RINGS} rings to ${km(SITE_COVERAGE_RADIUS_METRES)}`, 'lib/viewshed'],
     ['River level', 'leaky store: rises with lagged basin rain, drains toward base level', 'lib/forecast'],
-    ['Site failure', 'earliest of inundation, power (battery after the fuel road closes) and backhaul (parent dark)', 'lib/network'],
-    ['Coverage hole', 'people with signal now that no surviving site covers at the planned hour', 'lib/network'],
+    ['Site failure', 'earliest of inundation, power (battery after the fuel road closes) and backhaul (parent dark); an officer\'s report on a site wins', 'lib/network'],
+    ['Coverage hole', 'people the network as built covers that no surviving site covers at the planned hour', 'lib/network'],
     ['Plan', 'local top-ups assumed; the convoy and the portable tower ranked over the residual hole', 'lib/recommend'],
   ];
 
