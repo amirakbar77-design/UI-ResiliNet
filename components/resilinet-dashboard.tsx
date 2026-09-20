@@ -1344,6 +1344,11 @@ function RecommendationCard({
                 <span>
                   <span className="font-semibold text-white">Portable tower at {tower.site.candidate.name}</span>,
                   microwave to {siteNames[tower.backhaulTo] ?? tower.backhaulTo}, {tower.backhaulKm} km
+                  {/* The one line a crew has to carry out of this screen. */}
+                  <span className="mt-0.5 block text-slate-400 tabular-nums">
+                    {tower.site.candidate.lat.toFixed(5)}, {tower.site.candidate.lon.toFixed(5)}
+                    <span className="text-slate-500"> · {tower.site.candidate.elevation} m</span>
+                  </span>
                 </span>
               </li>
             )}

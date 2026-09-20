@@ -31,6 +31,24 @@ const IDLE_DRIFT_DELAY = 4200;
 const BASE_DAMPING = 0.07; // per 60 Hz frame; rescaled to the real frame time
 const GESTURE_TAIL_MS = 250;
 const WHEEL_ZOOM_RATE = 0.0008; // log-distance per wheel pixel (~8 % per 100 px)
+// How the camera reframes when the route wave sets off. The wave runs outward
+// from the depot along the whole road network, so the shot has to rise and pull
+// back to hold it: a low, near view loses the far end as the roads light up.
+// The pitch is a floor, not a set point — a camera already higher than this
+// stays where it is. OrbitControls' minPolarAngle caps the useful value at 78°.
+const WAVE_PITCH_DEG = 34; // degrees above the horizon
+const WAVE_PULL_BACK = 3; // multiplier on the current orbit distance
+// Hard ceiling as a fraction of the distance that would fit the whole tile on
+// screen. Past roughly half of that the mesh's own corners and the void behind
+// them come into shot, so the multiplier above is generous and this is what
+// normally binds. Being derived from the tile and the field of view, it holds
+// for a wide flat valley as well as a narrow steep one.
+const WAVE_FIT = 0.54;
+// How far the framing slides from the depot toward the middle of the tile as
+// the camera pulls back. The depot sits near one edge, so a wide shot centred
+// on it spends a third of the frame on the void past the mesh; centring pays
+// that space back as terrain while keeping the depot comfortably in view.
+const WAVE_CENTRE = 0.5;
 const SWIPE_ORBIT_RATE = 0.0035; // radians of azimuth per horizontal wheel pixel
 const SWIPE_FLY_RATE = 0.0025; // fraction of camera height per vertical wheel pixel
 const GESTURE_EASE_SECONDS = 0.12;
@@ -98,8 +116,8 @@ type SceneHandle = {
   ) => void;
   /** Jumps a running wave to its final state. */
   finishRouteWave: () => void;
-  /** Eases the camera a little toward the depot as the wave sets off. */
-  glideToDepot: () => void;
+  /** Lifts and pulls the camera back as the wave sets off, to keep it in frame. */
+  frameRouteWave: () => void;
   /** Raises the mast and permanent coverage at the winning site and glides to it. */
   showWinner: (site: SiteAssessment | null) => void;
   /** Pulses an outline on the site the plan sends the convoy to. */
@@ -276,10 +294,10 @@ function createScene(
   };
   controls.touches = { ONE: THREE.TOUCH.PAN, TWO: THREE.TOUCH.DOLLY_ROTATE };
   controls.minDistance = 45;
-  // Far enough back to frame the whole valley. Tied to the tile rather than a
-  // fixed number, because a flat coastal box and a mountain one are different
-  // sizes on screen and 700 barely cleared the opening view on either.
-  const groundMaxDistance = Math.max(g.extentX, g.extentZ) * 0.95;
+  // Far enough back to frame the whole valley, with room to pull off it. Tied
+  // to the tile rather than a fixed number, because a flat coastal box and a
+  // mountain one are different sizes on screen.
+  const groundMaxDistance = Math.max(g.extentX, g.extentZ) * 1.5;
   controls.maxDistance = groundMaxDistance;
   controls.minPolarAngle = 0.2;
   controls.maxPolarAngle = 1.45; // low enough to fly along the valley floor
@@ -1896,13 +1914,48 @@ function createScene(
         elapsed: 0,
       };
     },
-    glideToDepot() {
+    frameRouteWave() {
       if (view !== 'site' || flight || reduceMotion?.matches) return;
       const ground = depotBase.clone();
       ground.y = elevationToWorldY(elevationAt(ground.x, ground.z));
-      const toTarget = controls.target.clone().lerp(ground, 0.35);
-      const toPosition = camera.position.clone().lerp(ground, 0.16);
-      toPosition.y = Math.max(toPosition.y, camera.position.y * 0.92);
+      // Centre on the depot end, where the wave starts, but rise and pull
+      // back rather than closing in: the wave runs outward along the whole
+      // road network, and from the low, near view its far end left the frame.
+      const toTarget = controls.target
+        .clone()
+        .lerp(ground, 0.35)
+        .lerp(overviewTarget, WAVE_CENTRE);
+      const offset = camera.position.clone().sub(controls.target);
+      const distance = offset.length();
+      // Rebuild the view direction at an explicit angle above the horizon,
+      // keeping the compass bearing the camera already had.
+      const bearing = new THREE.Vector3(offset.x, 0, offset.z);
+      if (bearing.lengthSq() < 1e-6) bearing.set(1, 0, -1);
+      bearing.normalize();
+      const pitch = Math.max(
+        Math.asin(clamp(offset.y / Math.max(distance, 1e-6), -1, 1)),
+        THREE.MathUtils.degToRad(WAVE_PITCH_DEG),
+      );
+      const direction = new THREE.Vector3(
+        bearing.x * Math.cos(pitch),
+        Math.sin(pitch),
+        bearing.z * Math.cos(pitch),
+      );
+      const toPosition = toTarget
+        .clone()
+        .add(
+          direction.multiplyScalar(
+            Math.min(
+              distance * WAVE_PULL_BACK,
+              overviewDistance() * WAVE_FIT,
+              controls.maxDistance,
+            ),
+          ),
+        );
+      // Deliberately not clamped inside the tile the way the other views are.
+      // At this angle and distance the camera has to stand off the edge to get
+      // the whole valley and the horizon above it into one frame, which is the
+      // shot this stage wants; a little void in the bottom corners is the price.
       zoomActive = false;
       zoomAnchorValid = false;
       orbitPending = 0;
@@ -2201,7 +2254,7 @@ export function Terrain3D({
     }
     // A re-plan after a report keeps the camera where the officer left it
     // and shows the new plan at once; a fresh Start plays the wave.
-    if (!routeInstant) scene.glideToDepot();
+    if (!routeInstant) scene.frameRouteWave();
     scene.playRouteWave(routeEvaluation, routeSites, routeNetwork, {
       onProgress: onRouteProgress,
       onDone: onRouteDone,
@@ -2317,6 +2370,13 @@ export function Terrain3D({
                     </div>
                     <div className="mt-0.5 pl-6 text-xs text-emerald-100/85 tabular-nums">
                       reconnects {(site?.peopleReconnected ?? 0).toLocaleString()} people without signal
+                    </div>
+                    {/* The coordinate a crew would actually drive to. Five
+                        decimals is about a metre, which is finer than the 30 m
+                        DEM the site was picked from, but it is what a handheld
+                        GPS and every mapping app expect to be given. */}
+                    <div className="mt-1 pl-6 text-[11px] text-slate-300 tabular-nums">
+                      {anchor.lat.toFixed(5)}, {anchor.lon.toFixed(5)}
                     </div>
                   </div>
                   <div className="grid size-9 place-items-center rounded-full border-2 border-white bg-emerald-400 text-emerald-950 shadow-[0_0_0_7px_rgb(52_211_153/22%)]">
