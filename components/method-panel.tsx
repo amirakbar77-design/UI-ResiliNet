@@ -10,7 +10,8 @@ import { useEffect, useState } from 'react';
 import { X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { FORECAST_FILES, floodCurve, type Forecast } from '@/lib/forecast';
-import { GAUGE_RECORD_2014, gaugeToHandLevel } from '@/lib/gauge';
+import { gaugeToHandLevel } from '@/lib/gauge';
+import { MAPS, type MapSpec } from '@/lib/maps';
 import { type HindcastCheck, hindcastChecks } from '@/lib/hindcast';
 import { type MethodRow, methodSections } from '@/lib/method';
 import { assessNetwork } from '@/lib/network';
@@ -66,6 +67,7 @@ function Table({
 export function MethodPanel({
   open,
   onClose,
+  map,
   terrain,
   siteMasks,
   forecast,
@@ -73,6 +75,7 @@ export function MethodPanel({
 }: {
   open: boolean;
   onClose: () => void;
+  map: MapSpec;
   terrain: TerrainData | null;
   siteMasks: Map<string, ViewshedMask> | null;
   /** The file the app is running on; only its Live init date is quoted. */
@@ -82,23 +85,25 @@ export function MethodPanel({
 }) {
   const [checks, setChecks] = useState<HindcastCheck[] | null>(null);
 
-  // The 2014 check needs the 2014 rain; fetch it once, the first time the sheet opens.
+  // The 2014 check needs the 2014 rain, and only Kelantan has a checked
+  // record to be held against. Fetch it once, the first time the sheet opens.
   useEffect(() => {
-    if (!open || checks || !terrain || !siteMasks) return;
+    if (!open || checks || !terrain || !siteMasks || !map.hindcast) return;
     let cancelled = false;
+    const spec = MAPS.kelantan.gauge;
     fetch(FORECAST_FILES['hindcast-2014'])
       .then((r) => (r.ok ? (r.json() as Promise<Forecast>) : Promise.reject(new Error(String(r.status)))))
       .then((file) => {
         if (cancelled) return;
-        const level = gaugeToHandLevel(GAUGE_RECORD_2014);
+        const level = gaugeToHandLevel(spec.peak.metres, spec);
         const network = assessNetwork(terrain, floodCurve(file, level));
-        setChecks(hindcastChecks(terrain, network, siteMasks, level));
+        setChecks(hindcastChecks(terrain, network, siteMasks, level, spec));
       })
       .catch((error: unknown) => console.error('Failed to load the 2014 hindcast', error));
     return () => {
       cancelled = true;
     };
-  }, [open, checks, terrain, siteMasks]);
+  }, [open, checks, terrain, siteMasks, map.hindcast]);
 
   useEffect(() => {
     if (!open) return;
@@ -110,7 +115,7 @@ export function MethodPanel({
   }, [open, onClose]);
 
   if (!open) return null;
-  const sections = methodSections(terrain?.meta ?? null, forecast);
+  const sections = methodSections(map, terrain?.meta ?? null, forecast);
 
   return (
     <div className="fixed inset-0 z-[60]">
@@ -155,13 +160,14 @@ export function MethodPanel({
             <h3 className="text-[11px] font-semibold tracking-[0.12em] text-slate-400 uppercase">Seeds</h3>
             <p className="mt-1.5 text-xs text-slate-200">{sections.seeds}</p>
           </section>
+          {map.hindcast ? (
           <section aria-label="Checked against the record">
             <h3 className="text-[11px] font-semibold tracking-[0.12em] text-slate-400 uppercase">
               Checked against the record · December 2014
             </h3>
             <p className="mt-1.5 text-xs text-slate-400">
-              At the recorded {GAUGE_RECORD_2014} m peak: four things people reported, and what the model says.
-              The river constants were not tuned to fit it.
+              At the recorded {MAPS.kelantan.gauge.peak.metres} m peak: four things people
+              reported, and what the model says. The river constants were not tuned to fit it.
             </p>
             {checks ? (
               <table className="mt-2 w-full border-collapse text-xs">
@@ -191,6 +197,20 @@ export function MethodPanel({
               Open the December 2014 hindcast
             </Button>
           </section>
+          ) : (
+            <section aria-label="Checked against the record">
+              <h3 className="text-[11px] font-semibold tracking-[0.12em] text-slate-400 uppercase">
+                Checked against the record
+              </h3>
+              <p className="mt-1.5 text-xs text-slate-400">
+                Nothing yet for {map.short}. The Kelantan map is checked against
+                four reported facts from December 2014; this valley has no
+                sourced event checked against the model, so the sheet claims
+                none. Its rain is the design storm only, and its river
+                constants are illustrative.
+              </p>
+            </section>
+          )}
         </div>
       </dialog>
     </div>

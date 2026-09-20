@@ -38,23 +38,66 @@ import path from 'node:path';
 import { fromFile as geotiffFromFile } from 'geotiff';
 import sharp from 'sharp';
 
-// Area of interest: the Sungai Galas valley in Kelantan, from Gunung Stong and
-// Dabong in the south-west to the Galas–Lebir confluence at Kuala Krai. The
-// box straddles 102 °E, so it spans two SRTM tiles.
-const AOI = { west: 101.88, east: 102.28, south: 5.26, north: 5.6 };
+/**
+ * The areas of interest. Bake one with `npm run bake:terrain -- <id>`; the id
+ * also namespaces the Overpass cache and names the output directory, which is
+ * what `lib/maps.ts` serves each map from at runtime.
+ *
+ * `drainageCells` is the upstream-cell count before a cell counts as drainage,
+ * and it is the one constant that has to be tuned per valley: too low and the
+ * mountain ravines register as channels that fill with water, too high and the
+ * real tributaries stop draining. Tune it by eye against the flood sheet.
+ */
+const MAPS = {
+  // The Sungai Galas valley in Kelantan, from Gunung Stong and Dabong in the
+  // south-west to the Galas–Lebir confluence at Kuala Krai. The box straddles
+  // 102 °E, so it spans two SRTM tiles.
+  kelantan: {
+    out: 'public/terrain',
+    aoi: { west: 101.88, east: 102.28, south: 5.26, north: 5.6 },
+    // ~11 km², kept high so Stong's ravines are not channels.
+    drainageCells: 12000,
+    // The OSM place node the convoy starts from: the downstream town with
+    // the road and rail hub, which is where kit would actually be staged.
+    depot: 'Kuala Krai',
+  },
+  // The Sungai Padas in Sabah: the Beaufort floodplain and the gorge above it.
+  // One SRTM tile. The gorge villages — Pangi, Rayoh, Halogilat — have no road
+  // at all and are reached only by the Sabah State Railway, which the river can
+  // cut. The east edge stops short of Tenom on purpose: no road crosses the
+  // gorge, so Tenom's network is a separate component that the truck could
+  // never reach from Beaufort, and including it would fill the candidate list
+  // with sites nothing can drive to.
+  padas: {
+    out: 'public/terrain-padas',
+    aoi: { west: 115.52, east: 115.92, south: 5.12, north: 5.46 },
+    // The Crocker Range is steeper than Stong and its ravines are tighter, so
+    // the channel threshold has to rise with it or every gully floods.
+    drainageCells: 16000,
+    depot: 'Beaufort',
+  },
+};
+
+const MAP_ID = process.argv[2] ?? 'kelantan';
+if (!Object.hasOwn(MAPS, MAP_ID)) {
+  throw new Error(
+    `Unknown map "${MAP_ID}". Known maps: ${Object.keys(MAPS).join(', ')}`,
+  );
+}
+const MAP = MAPS[MAP_ID];
+
+const AOI = MAP.aoi;
+const DRAINAGE_CELLS = MAP.drainageCells;
 const SRTM_SPAN = 3601; // 1 arc-second samples per degree tile, inclusive edge
 const IMAGERY_ZOOM = 14;
 const TEXTURE_SIZE = 4096;
 const MESH_STEP = 2; // downsample factor from the 30 m analysis grid
-// Upstream cells (~11 km²) before a cell counts as drainage. Kept high so the
-// mountain ravines on Stong do not register as channels that fill with water.
-const DRAINAGE_CELLS = 12000;
 const HAND_CAP_DM = 254; // 25.4 m, well above any modelled flood level
 
 const CACHE = path.resolve('.cache');
-const OUT = path.resolve('public/terrain');
+const OUT = path.resolve(MAP.out);
 
-const log = (...args) => console.log('[bake]', ...args);
+const log = (...args) => console.log(`[bake:${MAP_ID}]`, ...args);
 
 async function exists(file) {
   try {
@@ -328,6 +371,52 @@ const mercY = (lat) => {
   return 0.5 - Math.log(Math.tan(phi) + 1 / Math.cos(phi)) / (2 * Math.PI);
 };
 
+/**
+ * The same EOX s2cloudless layer is served from two hosts. The WMTS endpoint
+ * is the documented one, but its CNAME does not resolve through every system
+ * resolver, so fall back to EOX's own CDN, which serves the identical tiles
+ * and wants a referer. Same data, same licence, same attribution.
+ */
+const TILE_HOSTS = [
+  {
+    url: (z, x, y) =>
+      `https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2020_3857/default/g/${z}/${y}/${x}.jpg`,
+    headers: { 'User-Agent': 'resilinet-3d-ui-concept/0.1 (build-time bake)' },
+  },
+  {
+    url: (z, x, y) =>
+      `https://s2maps-tiles.eu/wmts/1.0.0/s2cloudless-2020_3857/default/g/${z}/${y}/${x}.jpg`,
+    headers: {
+      'User-Agent': 'resilinet-3d-ui-concept/0.1 (build-time bake)',
+      Referer: 'https://s2maps.eu/',
+    },
+  },
+];
+/** Index of the host known to work; set by the first tile that succeeds. */
+let tileHost = 0;
+
+async function downloadTile(file, job) {
+  if (await exists(file)) return file;
+  let lastError = null;
+  for (let attempt = 0; attempt < TILE_HOSTS.length; attempt += 1) {
+    const index = (tileHost + attempt) % TILE_HOSTS.length;
+    const host = TILE_HOSTS[index];
+    try {
+      await download(host.url(IMAGERY_ZOOM, job.tx, job.ty), file, {
+        headers: host.headers,
+      });
+      if (index !== tileHost) {
+        log('imagery host', index === 0 ? 'tiles.maps.eox.at' : 's2maps-tiles.eu');
+        tileHost = index;
+      }
+      return file;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError;
+}
+
 async function bakeImagery() {
   const scale = 2 ** IMAGERY_ZOOM;
   const x0 = Math.floor(mercX(AOI.west) * scale);
@@ -356,12 +445,7 @@ async function bakeImagery() {
         'tiles',
         `${IMAGERY_ZOOM}_${job.tx}_${job.ty}.jpg`,
       );
-      const url = `https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2020_3857/default/g/${IMAGERY_ZOOM}/${job.ty}/${job.tx}.jpg`;
-      await download(url, file, {
-        headers: {
-          'User-Agent': 'resilinet-3d-ui-concept/0.1 (build-time bake)',
-        },
-      });
+      await downloadTile(file, job);
       composites.push({
         input: file,
         left: (job.tx - x0) * 256,
@@ -407,20 +491,35 @@ async function bakeImagery() {
 // --- OpenStreetMap context -------------------------------------------------
 
 async function overpass(query, cacheKey) {
-  const file = path.join(CACHE, `${cacheKey}.json`);
+  // Namespaced by map: the selectors are the same for every AOI, so an
+  // unprefixed key would serve one valley's roads for another's.
+  const file = path.join(CACHE, `${MAP_ID}-${cacheKey}.json`);
   if (!(await exists(file))) {
-    log('querying Overpass for', cacheKey);
-    const response = await fetch('https://overpass-api.de/api/interpreter', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'User-Agent': 'resilinet-3d-ui-concept/0.1 (build-time bake)',
-      },
-      body: new URLSearchParams({ data: query }),
-    });
-    if (!response.ok) throw new Error(`Overpass ${response.status}`);
+    // Overpass rate-limits and times out under load (429, 504). Back off and
+    // retry rather than losing a bake that is otherwise minutes from done.
+    let text = null;
+    for (let attempt = 1; attempt <= 5 && text === null; attempt += 1) {
+      log('querying Overpass for', cacheKey, attempt > 1 ? `(attempt ${attempt})` : '');
+      const response = await fetch('https://overpass-api.de/api/interpreter', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'User-Agent': 'resilinet-3d-ui-concept/0.1 (build-time bake)',
+        },
+        body: new URLSearchParams({ data: query }),
+      });
+      if (response.ok) {
+        text = await response.text();
+      } else if ([429, 502, 503, 504].includes(response.status) && attempt < 5) {
+        const wait = attempt * 20_000;
+        log('Overpass', response.status, `— waiting ${wait / 1000}s`);
+        await new Promise((resolve) => setTimeout(resolve, wait));
+      } else {
+        throw new Error(`Overpass ${response.status}`);
+      }
+    }
     await mkdir(CACHE, { recursive: true });
-    await writeFile(file, await response.text());
+    await writeFile(file, text);
   }
   return JSON.parse(await readFile(file, 'utf8'));
 }
@@ -615,10 +714,11 @@ async function bakeFuelSources(places, graph) {
 
 /** The place node the truck starts from, snapped onto the road graph. */
 function pickDepot(places, graph) {
+  const name = MAP.depot;
   const place =
-    places.find((entry) => entry.name === 'Kuala Krai' && entry.place === 'town') ??
-    places.find((entry) => entry.name === 'Kuala Krai');
-  if (!place) throw new Error('no "Kuala Krai" place node in the AOI');
+    places.find((entry) => entry.name === name && entry.place === 'town') ??
+    places.find((entry) => entry.name === name);
+  if (!place) throw new Error(`no "${name}" place node in the AOI`);
   let best = null;
   for (const index of graph.roadNodes) {
     const [lon, lat] = graph.nodes[index];
@@ -1016,21 +1116,73 @@ async function bakePopulation(width, height) {
 
 // --- Existing network sites --------------------------------------------------
 
-// Hand-placed placeholder sites, used only to fill gaps where OSM and
-// OpenCellID have nothing: one per major settlement, on high ground beside a
-// road. Flagged source: 'seed' so the UI and README can say so.
-// Positions were picked from the DEM: the highest dry (HAND ≥ 3 m) cell within
-// 300 m of a road near each settlement, so a seed never sits in the river.
-const SITE_SEEDS = [
-  { name: 'Kuala Krai town', lon: 102.1965, lat: 5.5359 },
-  { name: 'Kuala Krai bypass', lon: 102.1798, lat: 5.5261 },
-  { name: 'Manek Urai', lon: 102.2296, lat: 5.3884 },
-  { name: 'Kuala Gris', lon: 102.0528, lat: 5.3638 },
-  { name: 'Dabong', lon: 101.982, lat: 5.3793 },
-  { name: 'Kemubu', lon: 102.054, lat: 5.3523 },
-  { name: 'Kuala Balah', lon: 102.0294, lat: 5.4467 },
-  { name: 'Jelawang', lon: 101.948, lat: 5.3889 },
-];
+// Placeholder sites, used only to fill gaps where OSM and OpenCellID have
+// nothing: one per major settlement, on high ground beside a road. Flagged
+// source: 'seed' so the UI and README can say so. They are derived from the
+// DEM by the rule below — the highest dry (HAND >= 3 m) cell within 300 m of
+// a road near each settlement, so a seed never sits in the river — rather
+// than hand-placed, so a new valley gets them without anyone inventing
+// infrastructure that is not there.
+const SEED_SEARCH_METRES = 900; // how far from the settlement a seed may sit
+const SEED_ROAD_METRES = 300; // and how far from a road
+const SEED_MIN_HAND_DM = 30; // 3 m above the nearest drainage
+
+/**
+ * Picks one seed per settlement, largest places first, by the documented
+ * rule. Returns them ordered so the biggest settlements seed first.
+ */
+function deriveSiteSeeds(grid, hand, places, graph) {
+  const { elevation, width, height } = grid;
+  const cellOf = (lon, lat) => {
+    const col = Math.floor(((lon - AOI.west) / (AOI.east - AOI.west)) * width);
+    const row = Math.floor(((AOI.north - lat) / (AOI.north - AOI.south)) * height);
+    if (col < 0 || row < 0 || col >= width || row >= height) return -1;
+    return row * width + col;
+  };
+  const rank = { city: 0, town: 1, suburb: 2, village: 3, hamlet: 4 };
+  const ordered = [...places].sort(
+    (a, b) => (rank[a.place] ?? 9) - (rank[b.place] ?? 9),
+  );
+
+  const seeds = [];
+  for (const place of ordered) {
+    const kx = metresPerDegLon(place.lat);
+    const dlon = SEED_SEARCH_METRES / kx;
+    const dlat = SEED_SEARCH_METRES / METRES_PER_DEG_LAT;
+    let best = null;
+    for (let lat = place.lat - dlat; lat <= place.lat + dlat; lat += 0.0004) {
+      for (let lon = place.lon - dlon; lon <= place.lon + dlon; lon += 0.0004) {
+        const index = cellOf(lon, lat);
+        if (index < 0 || hand[index] < SEED_MIN_HAND_DM) continue;
+        if (
+          Math.hypot((lon - place.lon) * kx, (lat - place.lat) * METRES_PER_DEG_LAT) >
+          SEED_SEARCH_METRES
+        ) {
+          continue;
+        }
+        // Beside a road: a mast that no truck can reach is not a site.
+        let nearRoad = false;
+        for (const node of graph.roadNodes) {
+          const [nlon, nlat] = graph.nodes[node];
+          if (
+            Math.hypot((nlon - lon) * kx, (nlat - lat) * METRES_PER_DEG_LAT) <=
+            SEED_ROAD_METRES
+          ) {
+            nearRoad = true;
+            break;
+          }
+        }
+        if (!nearRoad) continue;
+        if (!best || elevation[index] > best.elevation) {
+          best = { lon: Number(lon.toFixed(5)), lat: Number(lat.toFixed(5)), elevation: elevation[index] };
+        }
+      }
+    }
+    if (best) seeds.push({ name: place.name, lon: best.lon, lat: best.lat });
+  }
+  log('derived', seeds.length, 'placeholder site seeds');
+  return seeds;
+}
 const SITE_MIN_COUNT = 8;
 const SITE_MERGE_METRES = 300; // OSM/OpenCellID dedupe
 // OpenCellID positions are where phones heard a cell, each with a single
@@ -1227,14 +1379,14 @@ function buildSites(raw, grid, hand, places, graph, depot) {
     }
   }
   if (merged.length < SITE_MIN_COUNT) {
-    for (const seed of SITE_SEEDS) {
+    for (const seed of deriveSiteSeeds(grid, hand, places, graph)) {
       if (merged.length >= Math.max(SITE_MIN_COUNT, 12)) break;
-      if (merged.some((other) => metresBetween(other, seed) < SITE_MERGE_METRES)) continue;
+      if (merged.some((other) => metresBetween(other, seed) < SITE_SPACING_METRES)) continue;
       merged.push({ source: 'seed', name: seed.name, operator: null, lon: seed.lon, lat: seed.lat, mastMetres: null });
     }
   }
 
-  const town = places.find((p) => p.name === 'Kuala Krai' && p.place === 'town') ?? depot;
+  const town = places.find((p) => p.name === MAP.depot && p.place === 'town') ?? depot;
   const nearestPlace = (site) => {
     let best = null;
     for (const place of places) {
@@ -1354,6 +1506,7 @@ function buildSites(raw, grid, hand, places, graph, depot) {
 // --- Main ------------------------------------------------------------------
 
 async function main() {
+  log('AOI', `${AOI.west}..${AOI.east} E`, `${AOI.south}..${AOI.north} N`, '→', MAP.out);
   const tiles = await loadSrtm();
   const grid = cropAoi(tiles);
   const tree = drainageTree(grid);
@@ -1415,6 +1568,7 @@ async function main() {
   await bakeImagery();
 
   const metadata = {
+    mapId: MAP_ID,
     aoi: AOI,
     grid: { width, height, spacingMetres: MESH_STEP * 30.87 },
     elevation: { min, max, unit: 'metre', format: 'int16le' },

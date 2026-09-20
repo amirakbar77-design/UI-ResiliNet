@@ -282,10 +282,17 @@ export async function loadTerrain(base = '/terrain'): Promise<TerrainData> {
   };
 }
 
-let pending: Promise<TerrainData> | null = null;
+const pending = new Map<string, Promise<TerrainData>>();
 
-/** Suspense-friendly singleton so the fetch survives re-renders. */
-export function terrainResource() {
-  pending ??= loadTerrain();
-  return pending;
+/**
+ * Suspense-friendly cache, one entry per map, so the fetch survives
+ * re-renders and a map already visited comes back without refetching.
+ */
+export function terrainResource(base = '/terrain') {
+  let resource = pending.get(base);
+  if (!resource) {
+    resource = loadTerrain(base);
+    pending.set(base, resource);
+  }
+  return resource;
 }

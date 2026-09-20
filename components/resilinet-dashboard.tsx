@@ -41,7 +41,6 @@ import {
   type FloodBand,
   type FloodCurve,
   type Forecast,
-  FORECAST_MODES,
   type ForecastMode,
   floodBand,
   floodCurve,
@@ -49,6 +48,8 @@ import {
   loadForecast,
   MAX_LEVEL,
   MIN_LEVEL,
+  RECESSION,
+  type RiverModel,
   wallClockMode,
 } from '@/lib/forecast';
 import {
@@ -59,7 +60,8 @@ import {
   type SiteStatus,
   siteViewsheds,
 } from '@/lib/network';
-import { GAUGE_DANGER, GAUGE_RECORD_2014, gaugeToHandLevel } from '@/lib/gauge';
+import { gaugeToHandLevel } from '@/lib/gauge';
+import { DEFAULT_MAP, type MapId, type MapSpec, MAP_IDS, MAPS } from '@/lib/maps';
 import { baselineTopUps, convoyOptions, type Plan, recommendPlans, type Recommendation } from '@/lib/recommend';
 import { evaluateRoutes, type RouteEvaluation } from '@/lib/routing';
 import { assessSites, type SiteAssessment } from '@/lib/sites';
@@ -91,14 +93,6 @@ const layerOptions: Array<{
 ];
 
 type Stage = 'now' | 'forecast' | 'site';
-
-// Kuala Krai gauge (Sungai Kelantan), metres above gauge datum. Danger level
-// and the 2014 record are the published JPS figures; the slider range brackets
-// them.
-const GAUGE_MIN = 20;
-const GAUGE_MAX = 34;
-const GAUGE_STEP = 0.1;
-const GAUGE_DEFAULT = 27;
 
 /**
  * Wall-clock "now", at minute resolution so re-renders only happen when the
@@ -245,6 +239,72 @@ function StageIndicator({
   );
 }
 
+/**
+ * The product mark: a mast throwing coverage, standing over the water it has
+ * to stay above. Same drawing as public/favicon.svg.
+ */
+function BrandMark({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className} aria-hidden>
+      <path
+        d="M7.9 4.7a6.4 6.4 0 0 0 0 8.2"
+        stroke="#38BDF8"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+      />
+      <path
+        d="M16.1 4.7a6.4 6.4 0 0 1 0 8.2"
+        stroke="#38BDF8"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+      />
+      <path d="M12 5.6 14.9 17.1H9.1z" fill="#7DD3FC" />
+      <path d="M10.2 13.3h3.6" stroke="#0B1A27" strokeWidth="1.3" strokeLinecap="round" />
+      <path
+        d="M2.6 19.9q2.35-2.1 4.7 0t4.7 0 4.7 0 4.7 0"
+        stroke="#0C79D8"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+/**
+ * The event this was built for, in the event's own colours: MCMC blue
+ * (#0066b2) and amber (#fdb913), taken from agaif.mcmc.gov.my. The mark sits
+ * on a light chip because it is a full-colour logo with a blue wordmark that
+ * would otherwise sink into the dark bar.
+ */
+function EventBadge() {
+  return (
+    <span
+      className="hidden items-center gap-2 rounded-full border py-1 pl-1 pr-3 sm:inline-flex"
+      style={{
+        borderColor: 'rgba(253, 185, 19, 0.34)',
+        background:
+          'linear-gradient(90deg, rgba(0, 102, 178, 0.30) 0%, rgba(0, 102, 178, 0.14) 45%, rgba(253, 185, 19, 0.12) 100%)',
+      }}
+    >
+      {/* oxlint-disable-next-line no-img-element -- a 20 px static logo is not
+          an LCP candidate, and this app has no next/image loader configured. */}
+      <img
+        src="/mcmc-logo.png"
+        alt="Malaysian Communications and Multimedia Commission"
+        width={20}
+        height={20}
+        className="size-5 shrink-0 rounded-full bg-white object-contain p-[3px]"
+      />
+      <span className="text-[11px] font-medium tracking-[0.07em] whitespace-nowrap text-slate-200 uppercase">
+        ASEAN GeoAI Fusion{' '}
+        <span style={{ color: '#FDB913' }} className="font-semibold">
+          2026
+        </span>
+      </span>
+    </span>
+  );
+}
+
 function TopBar({
   stage,
   setStage,
@@ -253,18 +313,16 @@ function TopBar({
   setStage: (stage: Stage) => void;
 }) {
   return (
-    <header className="fixed inset-x-0 top-0 z-50 flex h-14 items-center border-b border-slate-600/45 bg-[#07111b]/92 px-3 backdrop-blur-xl sm:px-5">
+    <header className="fixed inset-x-0 top-0 z-50 flex h-14 items-center border-b border-slate-600/45 bg-[#07111b] px-3 sm:px-5">
       <div className="flex min-w-0 items-center gap-3">
-        <div className="grid size-8 shrink-0 place-items-center rounded-lg border border-sky-400/25 bg-sky-400/10 text-sky-300">
-          <Antenna className="size-[18px]" aria-hidden />
+        <div className="grid size-8 shrink-0 place-items-center rounded-lg border border-sky-400/25 bg-sky-400/10">
+          <BrandMark className="size-[19px]" />
         </div>
-        <div className="flex min-w-0 items-baseline gap-2.5">
+        <div className="flex min-w-0 items-center gap-2.5">
           <span className="truncate text-[18px] font-semibold tracking-[-0.03em] text-sky-300 sm:text-xl">
-            resiliNet 3D
+            ResiliNet 3D
           </span>
-          <span className="hidden rounded-full border border-slate-600/70 bg-slate-800/75 px-2.5 py-1 text-[11px] font-medium tracking-[0.06em] text-slate-300 uppercase sm:inline-flex">
-            ASEAN GeoAI Fusion 2026
-          </span>
+          <EventBadge />
         </div>
       </div>
 
@@ -282,7 +340,7 @@ function UtilityRail({ methodOpen, onOpenMethod }: { methodOpen: boolean; onOpen
   return (
     <nav
       aria-label="Dashboard tools"
-      className="fixed bottom-0 left-0 top-14 z-40 hidden w-14 flex-col items-center gap-2 border-r border-slate-600/40 bg-[#07111b]/94 py-3 backdrop-blur-xl md:flex"
+      className="fixed bottom-0 left-0 top-14 z-40 hidden w-14 flex-col items-center gap-2 border-r border-slate-600/40 bg-[#07111b] py-3 md:flex"
     >
       <span
         aria-label="Map layers"
@@ -313,7 +371,7 @@ function MobileDock({ onOpenAnalysis, onOpenMethod }: { onOpenAnalysis: () => vo
   return (
     <nav
       aria-label="Dashboard tools"
-      className="fixed inset-x-2 bottom-2 z-50 flex h-14 items-center justify-around rounded-2xl border border-slate-600/45 bg-[#07111b]/94 px-2 shadow-2xl backdrop-blur-xl md:hidden"
+      className="fixed inset-x-2 bottom-2 z-50 flex h-14 items-center justify-around rounded-2xl border border-slate-600/45 bg-[#07111b] px-2 shadow-2xl md:hidden"
     >
       <button
         type="button"
@@ -385,7 +443,7 @@ function TerrainFallback() {
           filter="url(#soft-shadow)"
         />
       </svg>
-      <div className="absolute bottom-24 left-[18%] rounded-md border border-white/10 bg-slate-950/25 px-2 py-1 text-[11px] font-medium tracking-[0.08em] text-white/55 uppercase backdrop-blur-sm">
+      <div className="absolute bottom-24 left-[18%] rounded-md border border-white/10 bg-slate-950/70 px-2 py-1 text-[11px] font-medium tracking-[0.08em] text-white/55 uppercase">
         Offline terrain preview
       </div>
     </div>
@@ -393,6 +451,7 @@ function TerrainFallback() {
 }
 
 function TerrainStage({
+  map,
   layers,
   level,
   view,
@@ -413,6 +472,7 @@ function TerrainStage({
   topUpIds,
   resetSignal,
 }: {
+  map: MapSpec;
   layers: Record<LayerKey, boolean>;
   level: number;
   view: View;
@@ -435,11 +495,12 @@ function TerrainStage({
 }) {
   return (
     <section
-      aria-label="Interactive 3D terrain model of the Sungai Galas valley, Dabong to Kuala Krai"
+      aria-label={map.sceneLabel}
       className="absolute inset-0 overflow-hidden bg-[#173b31]"
     >
       <Suspense fallback={<TerrainFallback />}>
         <Terrain3D
+          assetBase={map.assetBase}
           layers={layers}
           level={level}
           view={view}
@@ -470,21 +531,103 @@ function TerrainStage({
   );
 }
 
+/**
+ * The place chip, which opens the list of valleys. Switching is a heavy
+ * change — new terrain, new gauge, no plan — so it reads as a deliberate
+ * choice rather than a filter.
+ */
+function MapPicker({
+  map,
+  onMapChange,
+}: {
+  map: MapSpec;
+  onMapChange: (id: MapId) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        aria-expanded={open}
+        aria-haspopup="menu"
+        className="glass-panel flex w-full items-start gap-3 rounded-xl px-3.5 py-3 text-left text-sm font-medium text-slate-100 transition-colors hover:bg-slate-700/35"
+      >
+        <MapPin className="mt-0.5 size-4 shrink-0 text-sky-300" aria-hidden />
+        <span className="flex-1 leading-5">{map.label}</span>
+        <ChevronDown
+          className={`mt-0.5 size-4 shrink-0 text-slate-400 transition-transform ${open ? 'rotate-180' : ''}`}
+          aria-hidden
+        />
+      </button>
+      {open && (
+        <>
+          {/* Click-away, behind the list but over the map. */}
+          <button
+            type="button"
+            aria-hidden
+            tabIndex={-1}
+            className="fixed inset-0 z-10 cursor-default"
+            onClick={() => setOpen(false)}
+          />
+          <ul
+            aria-label="Valley"
+            className="glass-panel absolute inset-x-0 top-full z-20 mt-1.5 overflow-hidden rounded-xl p-1"
+          >
+            {MAP_IDS.map((id) => {
+              const option = MAPS[id];
+              const active = id === map.id;
+              return (
+                <li key={id}>
+                  <button
+                    type="button"
+                    aria-current={active ? 'true' : undefined}
+                    onClick={() => {
+                      onMapChange(id);
+                      setOpen(false);
+                    }}
+                    className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors ${
+                      active
+                        ? 'bg-sky-400/12 text-sky-100'
+                        : 'text-slate-200 hover:bg-slate-700/45'
+                    }`}
+                  >
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-medium">
+                        {option.short}
+                      </span>
+                      <span className="block truncate text-[11px] text-slate-400">
+                        {option.sublabel}
+                      </span>
+                    </span>
+                    {active && (
+                      <Check className="size-4 shrink-0 text-sky-300" aria-hidden />
+                    )}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </>
+      )}
+    </div>
+  );
+}
+
 function LayerPanel({
+  map,
+  onMapChange,
   layers,
   onLayerChange,
 }: {
+  map: MapSpec;
+  onMapChange: (id: MapId) => void;
   layers: Record<LayerKey, boolean>;
   onLayerChange: (key: LayerKey, value: boolean) => void;
 }) {
   return (
     <aside className="absolute left-16 top-20 z-30 hidden w-72 md:block">
-      <div className="glass-panel flex items-start gap-3 rounded-xl px-3.5 py-3 text-sm font-medium text-slate-100">
-        <MapPin className="mt-0.5 size-4 shrink-0 text-sky-300" aria-hidden />
-        <span className="leading-5">
-          Dabong – Kuala Krai, Sungai Galas valley, Kelantan, Malaysia
-        </span>
-      </div>
+      <MapPicker map={map} onMapChange={onMapChange} />
       <div className="glass-panel mt-2 overflow-hidden rounded-xl p-2">
         <div className="flex items-center justify-between px-2 pb-2 pt-1">
           <span className="text-xs font-semibold tracking-[0.12em] text-slate-400 uppercase">
@@ -518,6 +661,7 @@ function LayerPanel({
 }
 
 function GaugeControl({
+  map,
   gauge,
   setGauge,
   now,
@@ -527,6 +671,7 @@ function GaugeControl({
   onCycleMode,
   onNext,
 }: {
+  map: MapSpec;
   gauge: number;
   setGauge: (value: number) => void;
   now: number | null;
@@ -536,11 +681,18 @@ function GaugeControl({
   onCycleMode: () => void;
   onNext: () => void;
 }) {
-  const aboveDanger = gauge - GAUGE_DANGER;
+  const spec = map.gauge;
+  const aboveDanger = gauge - spec.danger;
+  // Stations differ by an order of magnitude in how far they move above
+  // danger level, so the readout follows the station's own step.
+  const decimals = spec.step < 0.1 ? 2 : 1;
+  const quantum = 1 / spec.step;
   const commit = (raw: string) => {
     const value = Number.parseFloat(raw);
     if (Number.isFinite(value)) {
-      setGauge(clamp(Math.round(value * 10) / 10, GAUGE_MIN, GAUGE_MAX));
+      setGauge(
+        clamp(Math.round(value * quantum) / quantum, spec.min, spec.max),
+      );
     }
   };
 
@@ -577,7 +729,7 @@ function GaugeControl({
           htmlFor="gauge-reading"
           className="text-[11px] font-semibold tracking-[0.1em] text-slate-500 uppercase"
         >
-          Kuala Krai gauge
+          {spec.station}
         </label>
         <div className="mt-1.5 flex items-baseline gap-2">
           {/* Uncontrolled and re-keyed on the committed value, so typing is
@@ -587,10 +739,10 @@ function GaugeControl({
             key={gauge}
             type="number"
             inputMode="decimal"
-            min={GAUGE_MIN}
-            max={GAUGE_MAX}
-            step={GAUGE_STEP}
-            defaultValue={gauge.toFixed(1)}
+            min={spec.min}
+            max={spec.max}
+            step={spec.step}
+            defaultValue={gauge.toFixed(decimals)}
             onBlur={(event) => commit(event.currentTarget.value)}
             onKeyDown={(event) => {
               if (event.key === 'Enter') commit(event.currentTarget.value);
@@ -601,18 +753,20 @@ function GaugeControl({
         </div>
         <Slider
           value={[gauge]}
-          min={GAUGE_MIN}
-          max={GAUGE_MAX}
-          step={GAUGE_STEP}
+          min={spec.min}
+          max={spec.max}
+          step={spec.step}
           onValueChange={(value) =>
             setGauge(typeof value === 'number' ? value : (value[0] ?? gauge))
           }
-          aria-label="Kuala Krai gauge reading in metres"
+          aria-label={`${spec.station} reading in metres`}
           className="mt-4 [&_[data-slot=slider-range]]:bg-sky-400 [&_[data-slot=slider-thumb]]:size-4 [&_[data-slot=slider-thumb]]:border-white [&_[data-slot=slider-thumb]]:bg-sky-400 [&_[data-slot=slider-track]]:h-1 [&_[data-slot=slider-track]]:bg-slate-600"
         />
         <div className="mt-2 flex justify-between text-[11px] text-slate-500 tabular-nums">
-          <span>Danger level {GAUGE_DANGER.toFixed(1)} m</span>
-          <span>Record 2014: {GAUGE_RECORD_2014.toFixed(1)} m</span>
+          <span>Danger level {spec.danger.toFixed(decimals)} m</span>
+          <span>
+            {spec.peak.label}: {spec.peak.metres.toFixed(decimals)} m
+          </span>
         </div>
         <p
           className={`mt-3 rounded-lg border px-2.5 py-2 text-xs font-medium tabular-nums ${
@@ -623,8 +777,8 @@ function GaugeControl({
           aria-live="polite"
         >
           {aboveDanger >= 0
-            ? `${aboveDanger.toFixed(1)} m above danger level`
-            : `${(-aboveDanger).toFixed(1)} m below danger level`}
+            ? `${aboveDanger.toFixed(decimals)} m above danger level`
+            : `${(-aboveDanger).toFixed(decimals)} m below danger level`}
         </p>
         {network && (
           <p
@@ -1225,6 +1379,7 @@ function RecommendationCard({
 }
 
 function RouteControls({
+  depotName,
   route,
   ready,
   plannedClock,
@@ -1234,6 +1389,7 @@ function RouteControls({
   onStart,
   onSkip,
 }: {
+  depotName: string;
   route: RouteState | null;
   ready: boolean;
   plannedClock: string;
@@ -1286,8 +1442,8 @@ function RouteControls({
             {route.cuts} {route.cuts === 1 ? 'cut' : 'cuts'}
           </p>
           <p className="mt-1 text-[11px] text-slate-500">
-            From the Kuala Krai depot at today&rsquo;s level; colours show when the
-            forecast closes each road.
+            From the {depotName} depot at today&rsquo;s level; colours show when
+            the forecast closes each road.
           </p>
           <ul className="mt-3 grid grid-cols-2 gap-x-3 gap-y-1.5 text-[11px] text-slate-300">
             {waveLegend.map(([swatch, label]) => (
@@ -1332,6 +1488,8 @@ function RouteControls({
 }
 
 function StageContent({
+  map,
+  depotName,
   stage,
   gauge,
   setGauge,
@@ -1382,6 +1540,7 @@ function StageContent({
         <p className="text-[13px] leading-5 text-slate-400">{entry.helper}</p>
         {stage === 'now' && (
           <GaugeControl
+            map={map}
             gauge={gauge}
             setGauge={setGauge}
             now={now}
@@ -1400,6 +1559,7 @@ function StageContent({
         )}
         {stage === 'site' && (
           <RouteControls
+            depotName={depotName}
             route={route}
             ready={routesReady}
             plannedClock={plannedClock}
@@ -1443,6 +1603,9 @@ type RouteState = {
 };
 
 type StageProps = {
+  map: MapSpec;
+  /** The town the convoy starts from, as the bake named it. */
+  depotName: string;
   stage: Stage;
   gauge: number;
   setGauge: (value: number) => void;
@@ -1493,9 +1656,13 @@ function InterventionPanel({
 }
 
 function MobileControls({
+  map,
+  onMapChange,
   layers,
   onLayerChange,
 }: {
+  map: MapSpec;
+  onMapChange: (id: MapId) => void;
   layers: Record<LayerKey, boolean>;
   onLayerChange: (key: LayerKey, value: boolean) => void;
 }) {
@@ -1512,7 +1679,7 @@ function MobileControls({
         >
           <MapPin className="size-4 shrink-0 text-sky-300" aria-hidden />
           <span className="min-w-0 flex-1 truncate text-sm font-medium text-white">
-            Dabong – Kuala Krai, Kelantan
+            {map.short}, {map.sublabel.split(' · ')[1]}
           </span>
           <span className="rounded border border-amber-300/20 bg-amber-300/8 px-1.5 py-1 text-[9px] font-bold tracking-[0.08em] text-amber-200 uppercase">
             Concept
@@ -1523,7 +1690,35 @@ function MobileControls({
           />
         </button>
         {expanded && (
-          <div className="grid grid-cols-2 gap-1 border-t border-slate-600/30 p-2">
+          <div className="border-t border-slate-600/30 p-2">
+            {/* The valley comes first: it changes everything below it. */}
+            <div className="mb-2 grid grid-cols-2 gap-1">
+              {MAP_IDS.map((id) => {
+                const option = MAPS[id];
+                const active = id === map.id;
+                return (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => onMapChange(id)}
+                    aria-current={active ? 'true' : undefined}
+                    className={`flex min-h-11 flex-col justify-center rounded-lg px-2 text-left ${
+                      active
+                        ? 'bg-sky-400/12 text-sky-100'
+                        : 'bg-slate-900/30 text-slate-400'
+                    }`}
+                  >
+                    <span className="truncate text-[11px] font-medium">
+                      {option.short}
+                    </span>
+                    <span className="truncate text-[10px] opacity-70">
+                      {option.sublabel}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          <div className="grid grid-cols-2 gap-1">
             {layerOptions.map(({ key, label, icon: Icon }) => (
               <button
                 key={key}
@@ -1536,6 +1731,7 @@ function MobileControls({
                 {label}
               </button>
             ))}
+          </div>
           </div>
         )}
       </div>
@@ -1556,7 +1752,7 @@ function MobileAnalysis({
   return (
     <dialog
       open
-      className="fixed inset-0 z-[60] m-0 flex size-full max-h-none max-w-none items-end border-0 bg-black/40 p-0 backdrop-blur-[2px] md:hidden"
+      className="fixed inset-0 z-[60] m-0 flex size-full max-h-none max-w-none items-end border-0 bg-black/55 p-0 md:hidden"
       aria-label="Stage panel"
     >
       <div className="glass-panel flex max-h-[84dvh] w-full flex-col overflow-hidden rounded-t-2xl border-x-0 border-b-0">
@@ -1584,13 +1780,21 @@ export function ResilinetDashboard() {
     population: true,
   });
   const [stage, setStage] = useState<Stage>('now');
-  const [gauge, setGauge] = useState(GAUGE_DEFAULT);
+  // Which valley is on screen. The chip above the layer panel switches it;
+  // everything below reads its constants out of `lib/maps`.
+  const [mapId, setMapId] = useState<MapId>(DEFAULT_MAP);
+  const map = MAPS[mapId];
+  const [gauge, setGauge] = useState(map.gauge.initial);
   // Which rain the demo runs on; the chip beside the clock cycles it. The
   // scenario (a synthetic design storm) is the default; the dated feeds are real.
   const [mode, setMode] = useState<ForecastMode>('scenario');
   const [rawForecast, setRawForecast] = useState<Forecast | null>(null);
   // The same baked assets the scene uses; needed here for routing and sites.
-  const [terrain, setTerrain] = useState<TerrainData | null>(null);
+  // Tagged with the map they were baked for: routing, viewsheds and the scene
+  // all key off terrain, and mixing two valleys' graphs would plan nonsense,
+  // so a load for the wrong map reads as "not loaded yet".
+  const [loaded, setLoaded] = useState<{ base: string; data: TerrainData } | null>(null);
+  const terrain = loaded?.base === map.assetBase ? loaded.data : null;
   // Officer overrides of site status — how NOC alarms would enter later.
   const [siteOverrides, setSiteOverrides] = useState<Overrides>({});
   const [route, setRoute] = useState<RouteState | null>(null);
@@ -1609,26 +1813,48 @@ export function ResilinetDashboard() {
 
   useEffect(() => {
     let cancelled = false;
-    terrainResource().then(
+    const base = map.assetBase;
+    terrainResource(base).then(
       (data) => {
-        if (!cancelled) setTerrain(data);
+        if (!cancelled) setLoaded({ base, data });
       },
       (error: unknown) => console.error('Failed to load terrain', error),
     );
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [map.assetBase]);
+
+  /**
+   * Switching valley is a fresh start: new assets, new gauge, no plan. The
+   * rain mode carries over when the new map has a file for it and falls back
+   * to its first available input when it does not.
+   */
+  const onMapChange = (next: MapId) => {
+    if (next === mapId) return;
+    const spec = MAPS[next];
+    setMapId(next);
+    setGauge(spec.gauge.initial);
+    setMode((current) =>
+      spec.forecastModes.includes(current) ? current : spec.forecastModes[0]!,
+    );
+    setStage('now');
+    setChosenHour(null);
+    setRoute(null);
+    setSiteOverrides({});
+    setForecastPlayed(false);
+    setResetSignal((n) => n + 1);
+  };
 
   // A new mode is a new event: reload the file, prefill the gauge with the
   // event's recorded reading when one was found, and drop any plan in progress.
   useEffect(() => {
     let cancelled = false;
-    loadForecast(mode).then(
+    loadForecast(mode, map.forecastFiles).then(
       (data) => {
         if (cancelled) return;
         setRawForecast(data);
-        setGauge(data.gauge?.reading ?? GAUGE_DEFAULT);
+        setGauge(data.gauge?.reading ?? map.gauge.initial);
         setChosenHour(null);
         setRoute(null);
         setSiteOverrides({});
@@ -1639,10 +1865,13 @@ export function ResilinetDashboard() {
     return () => {
       cancelled = true;
     };
-  }, [mode]);
+  }, [mode, map.forecastFiles, map.gauge.initial]);
+  // Cycles only the inputs this map has a file for; a map with one input has
+  // nothing to cycle, and the chip says so instead of pretending.
+  const modes = map.forecastModes;
   const onCycleMode = useCallback(() => {
-    setMode((current) => FORECAST_MODES[(FORECAST_MODES.indexOf(current) + 1) % FORECAST_MODES.length]!);
-  }, []);
+    setMode((current) => modes[(modes.indexOf(current) + 1) % modes.length]!);
+  }, [modes]);
 
   const clock = useClock();
   // Scenario and Live: "now" is the wall clock; the live file is trimmed to
@@ -1657,12 +1886,25 @@ export function ResilinetDashboard() {
   // The river-level curve starts from the observed gauge reading. Where the
   // source has an ensemble spread the plan runs on p50 and the timeline shows
   // p10–p90; a reanalysis has no spread and runs on its single series.
+  // The station's own stage response, not the app's: see `lib/maps`.
+  const river: RiverModel = useMemo(
+    () => ({
+      runoffCoef: map.gauge.runoffCoef,
+      recession: RECESSION,
+      lagHours: map.gauge.lagHours,
+      baseLevel: MIN_LEVEL,
+    }),
+    [map.gauge.runoffCoef, map.gauge.lagHours],
+  );
   const { curve, band } = useMemo(() => {
     if (!forecast) return { curve: null, band: null };
-    const level = gaugeToHandLevel(gauge);
-    const spread = floodBand(forecast, level);
-    return { curve: spread?.p50 ?? floodCurve(forecast, level), band: spread };
-  }, [forecast, gauge]);
+    const level = gaugeToHandLevel(gauge, map.gauge);
+    const spread = floodBand(forecast, level, river);
+    return {
+      curve: spread?.p50 ?? floodCurve(forecast, level, river),
+      band: spread,
+    };
+  }, [forecast, gauge, map.gauge, river]);
   // Existing-network status and failure hours follow the gauge and the curve.
   const network = useMemo(
     () => (terrain && curve ? assessNetwork(terrain, curve, siteOverrides) : null),
@@ -1704,8 +1946,10 @@ export function ResilinetDashboard() {
 
   // Now floods from the gauge; Forecast and Site from the curve at the chosen
   // hour (falling back to the gauge if the forecast file is unavailable).
-  const plannedLevel = curve ? curve.levelAt(forecastHour) : gaugeToHandLevel(gauge);
-  const level = stage === 'now' ? gaugeToHandLevel(gauge) : plannedLevel;
+  const plannedLevel = curve
+    ? curve.levelAt(forecastHour)
+    : gaugeToHandLevel(gauge, map.gauge);
+  const level = stage === 'now' ? gaugeToHandLevel(gauge, map.gauge) : plannedLevel;
   const plannedClock = clockLabel(now, forecastHour);
   // The forecast is read from above; every other stage is on the ground.
   // Now: the home oblique. Forecast: top-down. Site: from behind the depot,
@@ -1742,12 +1986,12 @@ export function ResilinetDashboard() {
     const evaluation = evaluateRoutes(
       terrain.graph,
       terrain.meta.depot.node,
-      gaugeToHandLevel(gauge),
+      gaugeToHandLevel(gauge, map.gauge),
       curve.levels,
       curve.peakHour(),
     );
     const convoys = convoyOptions(terrain, network, siteMasks, hole, forecastHour, baseline, {
-      level: gaugeToHandLevel(gauge),
+      level: gaugeToHandLevel(gauge, map.gauge),
       levels: curve.levels,
     });
     // A candidate is worth showing only if some plan could give it a link:
@@ -1924,6 +2168,8 @@ export function ResilinetDashboard() {
   );
 
   const stageProps: StageProps = {
+    map,
+    depotName: terrain?.meta.depot.name ?? map.short,
     stage,
     gauge,
     setGauge,
@@ -1945,6 +2191,7 @@ export function ResilinetDashboard() {
   return (
     <main className="relative h-[100dvh] w-screen overflow-hidden bg-slate-900 text-slate-100">
       <TerrainStage
+        map={map}
         layers={layers}
         level={level}
         view={view}
@@ -1967,7 +2214,12 @@ export function ResilinetDashboard() {
       />
       <TopBar stage={stage} setStage={changeStage} />
       <UtilityRail methodOpen={methodOpen} onOpenMethod={() => setMethodOpen(true)} />
-      <LayerPanel layers={layers} onLayerChange={onLayerChange} />
+      <LayerPanel
+        map={map}
+        onMapChange={onMapChange}
+        layers={layers}
+        onLayerChange={onLayerChange}
+      />
       {stage === 'forecast' && forecast && curve && (
         <ForecastTimeline
           forecast={forecast}
@@ -1979,13 +2231,13 @@ export function ResilinetDashboard() {
           autoplay={autoplayForecast}
           onSettle={onForecastSettle}
           now={now}
-          floor={gaugeToHandLevel(gauge)}
+          floor={gaugeToHandLevel(gauge, map.gauge)}
           network={network}
           onNext={onNext}
         />
       )}
       {stage === 'site' && curve && (
-        <div className="absolute left-1/2 top-[124px] z-20 flex -translate-x-1/2 items-center gap-2 rounded-full border border-sky-300/25 bg-slate-950/70 py-1.5 pl-3.5 pr-1.5 text-xs text-slate-100 backdrop-blur-md md:top-20">
+        <div className="absolute left-1/2 top-[124px] z-20 flex -translate-x-1/2 items-center gap-2 rounded-full border border-sky-300/25 bg-slate-950/95 py-1.5 pl-3.5 pr-1.5 text-xs text-slate-100 md:top-20">
           <span className="tabular-nums">
             Planning for{' '}
             <span className="font-semibold text-white">
@@ -2012,7 +2264,12 @@ export function ResilinetDashboard() {
         onClose={() => setAnalysisOpen(false)}
         onOpen={() => setAnalysisOpen(true)}
       />
-      <MobileControls layers={layers} onLayerChange={onLayerChange} />
+      <MobileControls
+        map={map}
+        onMapChange={onMapChange}
+        layers={layers}
+        onLayerChange={onLayerChange}
+      />
       <MobileDock onOpenAnalysis={() => setMobileAnalysisOpen(true)} onOpenMethod={() => setMethodOpen(true)} />
       <MobileAnalysis
         {...stageProps}
@@ -2022,10 +2279,13 @@ export function ResilinetDashboard() {
       <MethodPanel
         open={methodOpen}
         onClose={() => setMethodOpen(false)}
+        map={map}
         terrain={terrain}
         siteMasks={siteMasks}
         forecast={rawForecast}
         onOpenHindcast={() => {
+          // The 2014 hindcast is a Kelantan file; opening it means going there.
+          onMapChange('kelantan');
           setMode('hindcast-2014');
           setMethodOpen(false);
         }}
@@ -2033,7 +2293,7 @@ export function ResilinetDashboard() {
 
       <div className="absolute bottom-6 right-[362px] z-20 hidden items-center gap-2 xl:flex">
         <span className="hidden text-[10px] font-medium tracking-[0.06em] text-white/55 uppercase 2xl:block">
-          Drag to pan · pinch to zoom · two fingers up/down to fly · left/right to orbit
+          Drag to pan · scroll or pinch to zoom · two fingers up/down to fly · left/right to orbit
         </span>
         <button
           type="button"
@@ -2043,7 +2303,7 @@ export function ResilinetDashboard() {
             changeStage('now');
             setResetSignal((value) => value + 1);
           }}
-          className="grid size-10 place-items-center rounded-xl border border-white/15 bg-slate-950/65 text-slate-300 backdrop-blur-md hover:bg-slate-800 hover:text-white"
+          className="grid size-10 place-items-center rounded-xl border border-white/15 bg-slate-950/95 text-slate-300 hover:bg-slate-800 hover:text-white"
         >
           <RotateCcw className="size-4" aria-hidden />
         </button>

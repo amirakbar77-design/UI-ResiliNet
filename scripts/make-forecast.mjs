@@ -24,10 +24,57 @@ import path from 'node:path';
 const COLS = 16;
 const ROWS = 14;
 const HOURS = 24;
-const ISSUED_AT = '2014-12-23T14:00:00+08:00';
+
+/**
+ * One design storm per map. The track runs down-valley in AOI-normalised
+ * coordinates (0..1 west→east, 0..1 south→north), so the band forms over the
+ * high ground and drifts toward the town the convoy starts from.
+ */
+const MAPS = {
+  kelantan: {
+    terrain: 'public/terrain/terrain.json',
+    out: 'public/forecast.json',
+    issuedAt: '2014-12-23T14:00:00+08:00',
+    station: 'Kuala Krai, Sungai Kelantan',
+    // From over Gunung Stong to beyond the Galas–Lebir confluence.
+    track: { start: { x: 0.12, y: 0.18 }, end: { x: 0.92, y: 0.88 } },
+    source:
+      'Design storm (synthetic, for demonstration): a convective band forming over Gunung Stong and drifting north-east along the Galas valley, peaking at hour 6',
+    gauge: {
+      reading: null,
+      station: 'Kuala Krai (Sungai Kelantan), danger level 25.0 m',
+      note: 'the demo opens at 27.0 m, two metres above danger level',
+    },
+  },
+  padas: {
+    terrain: 'public/terrain-padas/terrain.json',
+    out: 'public/forecast-padas.json',
+    issuedAt: '2024-12-05T14:00:00+08:00',
+    station: 'Beaufort, Sungai Padas',
+    // From over the Crocker Range at the head of the gorge in the south-east,
+    // down the Padas to the Beaufort plain in the north-west.
+    track: { start: { x: 0.86, y: 0.08 }, end: { x: 0.45, y: 0.85 } },
+    source:
+      'Design storm (synthetic, for demonstration): a convective band forming over the Crocker Range above the Padas gorge and drifting north-west down the river to the Beaufort plain, peaking at hour 6',
+    gauge: {
+      reading: null,
+      station: 'Beaufort (Sungai Padas), danger level 8.70 m',
+      note: 'the demo opens at 9.40 m, 0.7 m above danger level',
+    },
+  },
+};
+
+const MAP_ID = process.argv[2] ?? 'kelantan';
+if (!Object.hasOwn(MAPS, MAP_ID)) {
+  throw new Error(
+    `Unknown map "${MAP_ID}". Known maps: ${Object.keys(MAPS).join(', ')}`,
+  );
+}
+const MAP = MAPS[MAP_ID];
+const ISSUED_AT = MAP.issuedAt;
 
 const terrain = JSON.parse(
-  await readFile(path.resolve('public/terrain/terrain.json'), 'utf8'),
+  await readFile(path.resolve(MAP.terrain), 'utf8'),
 );
 const { aoi } = terrain;
 
@@ -44,10 +91,8 @@ function mulberry32(seed) {
 }
 const random = mulberry32(20141223);
 
-// Band track in AOI-normalised coordinates (0..1 west→east, 0..1 south→north):
-// from over Gunung Stong to beyond the Galas–Lebir confluence at Kuala Krai.
-const TRACK_START = { x: 0.12, y: 0.18 };
-const TRACK_END = { x: 0.92, y: 0.88 };
+const TRACK_START = MAP.track.start;
+const TRACK_END = MAP.track.end;
 const TRACK_HOURS = 10;
 
 // Time envelopes (mm/h at the band core).
@@ -116,31 +161,24 @@ for (let h = 0; h < HOURS; h += 1) {
 }
 
 const forecast = {
-  source: 'Design storm (synthetic, for demonstration): a convective band forming over Gunung Stong and drifting north-east along the Galas valley, peaking at hour 6',
+  source: MAP.source,
   terms: 'synthetic — not a forecast; the three dated feeds behind the same chip are real',
   mode: 'scenario',
   issuedAt: ISSUED_AT,
-  station: 'Kuala Krai, Sungai Kelantan',
+  station: MAP.station,
   aoi,
   grid: { cols: COLS, rows: ROWS },
   hours: HOURS,
   units: { rain: 'mm/h', order: 'row-major, north row first' },
   catchmentMeanMmPerHour,
   spatial: 'drawn on the 16x14 tile grid; the catchment mean is the tile mean, not a basin mean',
-  gauge: {
-    reading: null,
-    station: 'Kuala Krai (Sungai Kelantan), danger level 25.0 m',
-    note: 'the demo opens at 27.0 m, two metres above danger level',
-  },
+  gauge: MAP.gauge,
   rain,
 };
 
-await writeFile(
-  path.resolve('public/forecast.json'),
-  JSON.stringify(forecast),
-);
+await writeFile(path.resolve(MAP.out), JSON.stringify(forecast));
 console.log(
-  '[forecast] wrote public/forecast.json',
+  `[forecast] wrote ${MAP.out}`,
   `${HOURS} h × ${COLS}×${ROWS} cells;`,
   'catchment mean peak',
   Math.max(...catchmentMeanMmPerHour),

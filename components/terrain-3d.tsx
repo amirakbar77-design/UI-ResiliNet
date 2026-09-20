@@ -276,7 +276,11 @@ function createScene(
   };
   controls.touches = { ONE: THREE.TOUCH.PAN, TWO: THREE.TOUCH.DOLLY_ROTATE };
   controls.minDistance = 45;
-  controls.maxDistance = 700;
+  // Far enough back to frame the whole valley. Tied to the tile rather than a
+  // fixed number, because a flat coastal box and a mountain one are different
+  // sizes on screen and 700 barely cleared the opening view on either.
+  const groundMaxDistance = Math.max(g.extentX, g.extentZ) * 0.95;
+  controls.maxDistance = groundMaxDistance;
   controls.minPolarAngle = 0.2;
   controls.maxPolarAngle = 1.45; // low enough to fly along the valley floor
   controls.autoRotateSpeed = 0.22;
@@ -1282,6 +1286,13 @@ function createScene(
   const homePosition = homeTarget
     .clone()
     .add(behindTower.normalize().multiplyScalar(orbitDistance));
+  // Stay over the tile. Where the flood sits at one end of the valley the
+  // target is far off centre, and standing the full orbit distance behind the
+  // mast would put the camera outside the mesh looking back across it, with
+  // the cut edge and the sky beyond it in frame.
+  const homeMargin = 0.06;
+  homePosition.x = clamp(homePosition.x, (-g.extentX / 2) * (1 - homeMargin), (g.extentX / 2) * (1 - homeMargin));
+  homePosition.z = clamp(homePosition.z, (-g.extentZ / 2) * (1 - homeMargin), (g.extentZ / 2) * (1 - homeMargin));
   camera.position.copy(homePosition);
   controls.target.copy(homeTarget);
   controls.update();
@@ -1355,7 +1366,7 @@ function createScene(
     controls.enableRotate = !overview;
     controls.minPolarAngle = overview ? 0.001 : 0.2;
     controls.maxPolarAngle = overview ? 0.001 : 1.45;
-    controls.maxDistance = overview ? overviewDistance() * 1.35 : 700;
+    controls.maxDistance = overview ? overviewDistance() * 1.35 : groundMaxDistance;
     scene.fog = overview ? null : fog;
     scene.background = overview ? null : sky;
     sun.intensity = overview ? SUN_OVERVIEW : SUN_GROUND;
@@ -1573,10 +1584,20 @@ function createScene(
     const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? 100 : 1;
     const deltaX = event.deltaX * unit;
     const deltaY = event.deltaY * unit;
-    if (event.ctrlKey) {
-      // macOS pinch arrives as ctrl+wheel with tiny deltas.
+    // A mouse wheel has no pinch, so a plain wheel has to zoom or a mouse
+    // user can never pull back. Wheels step in whole, sizeable notches with no
+    // sideways component; a trackpad's two-finger scroll drifts in small or
+    // fractional amounts and usually carries some deltaX. That keeps "two
+    // fingers up and down to fly" on the trackpad it was designed for.
+    const wheelNotch =
+      event.deltaMode !== 0 ||
+      (event.deltaX === 0 && Math.abs(event.deltaY) >= 50 && Number.isInteger(event.deltaY));
+    if (event.ctrlKey || wheelNotch) {
+      // macOS pinch arrives as ctrl+wheel with tiny deltas; a wheel notch is
+      // far coarser, so it gets a gentler rate to land in the same ballpark.
+      const rate = event.ctrlKey ? 8 : 1.2;
       zoomGoalLog = clamp(
-        zoomGoalLog + deltaY * 8 * WHEEL_ZOOM_RATE,
+        zoomGoalLog + deltaY * rate * WHEEL_ZOOM_RATE,
         Math.log(controls.minDistance),
         Math.log(controls.maxDistance),
       );
@@ -2042,6 +2063,7 @@ export type RouteNetwork = {
 };
 
 export function Terrain3D({
+  assetBase,
   layers,
   level,
   view,
@@ -2062,6 +2084,8 @@ export function Terrain3D({
   topUpIds,
   resetSignal,
 }: {
+  /** Which valley's baked assets to draw; see `lib/maps`. */
+  assetBase: string;
   layers: Record<LayerKey, boolean>;
   /** HAND flood threshold in metres above the drainage datum. */
   level: number;
@@ -2103,9 +2127,12 @@ export function Terrain3D({
     [terrain],
   );
 
+  // Switching valley swaps the assets; the scene effect below tears the old
+  // scene down and builds the new one when `terrain` changes. The outgoing
+  // scene stays up while the new assets load, rather than blanking the map.
   useEffect(() => {
     let cancelled = false;
-    terrainResource().then(
+    terrainResource(assetBase).then(
       (data) => {
         if (!cancelled) setTerrain(data);
       },
@@ -2117,7 +2144,7 @@ export function Terrain3D({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [assetBase]);
 
   useEffect(() => {
     const container = containerRef.current;

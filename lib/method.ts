@@ -4,8 +4,8 @@
  * line about seeds: what is real, what is derived, what is assumed.
  */
 
-import { BASE_LEVEL, type Forecast, LAG_HOURS, RECESSION, RUNOFF_COEF } from './forecast.ts';
-import { GAUGE_DANGER } from './gauge.ts';
+import { BASE_LEVEL, type Forecast, RECESSION } from './forecast.ts';
+import type { MapSpec } from './maps.ts';
 import { BATTERY_HOURS, FUEL_RUN_KM, GENSET_HOURS, SITE_COVERAGE_RADIUS_METRES } from './network.ts';
 import { CONVOY_KMH } from './recommend.ts';
 import { BRIDGE_DECK_HAND_DM, CUT_RUN_METRES, EMBANKMENT_HAND_DM } from './routing.ts';
@@ -26,23 +26,43 @@ export type MethodSections = {
 
 const km = (metres: number) => `${(metres / 1000).toFixed(metres % 1000 === 0 ? 0 : 1)} km`;
 
-export function methodSections(meta: TerrainMeta | null, live: Forecast | null): MethodSections {
+export function methodSections(
+  map: MapSpec,
+  meta: TerrainMeta | null,
+  live: Forecast | null,
+): MethodSections {
   const rules = meta?.rules;
+  const gauge = map.gauge;
   const masts = [...new Set((meta?.sites ?? []).map((s) => s.mastMetres))].sort((a, b) => a - b);
   const seeds = (meta?.sites ?? []).filter((s) => s.source === 'seed');
   const liveInit = live?.mode === 'live' ? live.issuedAt.slice(0, 16).replace('T', ' ') + 'Z' : 'newest 6-hourly init at fetch';
 
+  // The three dated feeds and the basin trace exist per valley, not per app:
+  // a map without them must not list them as sources it used.
+  const has = (mode: Parameters<typeof map.forecastModes.includes>[0]) =>
+    map.forecastModes.includes(mode);
   const real: MethodRow[] = [
     ['NASA SRTM', 'elevation, 30 m', 'public domain · 2000'],
     ['Sentinel-2 cloudless (EOX)', 'the ground texture', 'CC BY 4.0 · 2020'],
-    ['OpenStreetMap', 'roads, rail, bridges, buildings, places, petrol stations, one mast', 'ODbL · at bake'],
+    ['OpenStreetMap', 'roads, rail, bridges, buildings, places, petrol stations, masts', 'ODbL · at bake'],
     ['WorldPop', 'people per 100 m cell; every count in the app', 'CC BY 4.0 · 2020'],
-    ['OpenCellID', `cell samples, clustered into the ${meta?.sites.length ?? 12} existing sites`, 'CC BY-SA 4.0 · at bake'],
-    ['WeatherNext 3 (Live)', 'hourly basin rain, ensemble mean and p10–p90', `GDM experimental terms · ${liveInit}`],
-    ['WeatherNext 2 archive (Replay)', '6-hourly basin rain, issue 27 Nov 2024 00Z, five-issue band', 'CC BY 4.0 · 2024'],
-    ['ERA5-Land (Hindcast)', 'hourly basin rain from 22 Dec 2014 06Z', 'Copernicus C3S · 2014'],
-    ['HydroBASINS level 9', 'the 11,502 km² basin above the gauge', 'HydroSHEDS · v1'],
   ];
+  const fromCells = (meta?.sites ?? []).filter((s) => s.source === 'opencellid').length;
+  if (fromCells > 0) {
+    real.push(['OpenCellID', `cell samples, clustered into ${fromCells} of the ${meta?.sites.length ?? 12} existing sites`, 'CC BY-SA 4.0 · at bake']);
+  }
+  if (has('live')) {
+    real.push(['WeatherNext 3 (Live)', 'hourly basin rain, ensemble mean and p10–p90', `GDM experimental terms · ${liveInit}`]);
+  }
+  if (has('replay-2024')) {
+    real.push(['WeatherNext 2 archive (Replay)', '6-hourly basin rain, issue 27 Nov 2024 00Z, five-issue band', 'CC BY 4.0 · 2024']);
+  }
+  if (has('hindcast-2014')) {
+    real.push(['ERA5-Land (Hindcast)', 'hourly basin rain from 22 Dec 2014 06Z', 'Copernicus C3S · 2014']);
+  }
+  if (map.basinKm2 !== null) {
+    real.push(['HydroBASINS level 9', `the ${map.basinKm2.toLocaleString()} km² basin above the gauge`, 'HydroSHEDS · v1']);
+  }
 
   const synthetic: MethodRow[] = [
     ['Scenario · design storm', 'a drawn convective band, peaking at hour 6; the default rain', 'not data — labelled on the chip'],
@@ -50,9 +70,9 @@ export function methodSections(meta: TerrainMeta | null, live: Forecast | null):
 
   const derived: MethodRow[] = [
     ['HAND', 'height above the nearest drainage cell: priority-flood fill and D8 flow on SRTM', 'lib/terrain-field, bake'],
-    ['Flood at a level', `every cell with HAND below the level; level = gauge − ${GAUGE_DANGER} m`, 'lib/gauge'],
+    ['Flood at a level', `every cell with HAND below the level; level = (gauge − ${gauge.danger} m) × ${gauge.metresPerGaugeMetre}`, 'lib/gauge'],
     ['Road cut', `${CUT_RUN_METRES} m of a road continuously under water, after bridge and embankment allowances`, 'lib/routing'],
-    ['Route wave', 'Dijkstra from the Kuala Krai depot over roads not cut; closing hours read off the forecast', 'lib/routing'],
+    ['Route wave', `Dijkstra from the ${meta?.depot.name ?? map.short} depot over roads not cut; closing hours read off the forecast`, 'lib/routing'],
     ['Viewshed', `line of sight from the mast over SRTM, ${VIEWSHED_SPOKES} spokes × ${VIEWSHED_RINGS} rings to ${km(SITE_COVERAGE_RADIUS_METRES)}`, 'lib/viewshed'],
     ['River level', 'leaky store: rises with lagged basin rain, drains toward base level', 'lib/forecast'],
     ['Site failure', 'earliest of inundation, power (battery after the fuel road closes) and backhaul (parent dark); an officer\'s report on a site wins', 'lib/network'],
@@ -62,10 +82,10 @@ export function methodSections(meta: TerrainMeta | null, live: Forecast | null):
 
   const emb = EMBANKMENT_HAND_DM;
   const assumptions: MethodRow[] = [
-    ['Gauge → flood level', `1 m above the ${GAUGE_DANGER} m danger level = 1 m of water above the drainage datum`, 'JPS rating curve per reach'],
-    ['Runoff', `${RUNOFF_COEF} m of stage per mm/h of basin rain`, 'unit hydrograph × rating curve'],
+    ['Gauge → flood level', `1 m above the ${gauge.danger} m danger level = ${gauge.metresPerGaugeMetre} m of water above the drainage datum`, 'JPS rating curve per reach'],
+    ['Runoff', `${gauge.runoffCoef} m of stage per mm/h of basin rain`, 'unit hydrograph × rating curve'],
     ['Recession', `${RECESSION} of the excess stage drains each hour`, 'fitted to past hydrographs'],
-    ['Lag', `${LAG_HOURS} h from rain to gauge`, 'time of concentration'],
+    ['Lag', `${gauge.lagHours} h from rain to gauge`, 'time of concentration'],
     ['Base level', `${BASE_LEVEL} m`, "the station's normal level"],
     ['Bridge deck', `+${BRIDGE_DECK_HAND_DM / 10} m above the channel`, 'bridge survey'],
     ['Embankment', `trunk/primary +${(emb.trunk ?? 0) / 10} m, secondary +${(emb.secondary ?? 0) / 10} m, tertiary +${(emb.tertiary ?? 0) / 10} m`, 'LiDAR road heights'],
@@ -98,7 +118,7 @@ export function methodSections(meta: TerrainMeta | null, live: Forecast | null):
     assumptions,
     seeds:
       seeds.length === 0
-        ? `None in this bake: all ${meta?.sites.length ?? 12} sites come from OpenCellID and OpenStreetMap. Hand-placed seeds, flagged "seed", are added only where the map is empty.`
-        : `${seeds.length} hand-placed: ${seeds.map((s) => s.name).join(', ')} — flagged "seed" on the map; placeholders, not infrastructure.`,
+        ? `None in this bake: all ${meta?.sites.length ?? 12} sites come from OpenCellID and OpenStreetMap. Seeds, flagged "seed", are added only where the map is empty.`
+        : `${seeds.length} of ${meta?.sites.length ?? 12} sites are seeds: ${seeds.map((s) => s.name).join(', ')} — placed by rule on the highest dry ground within 300 m of a road near each settlement, because the map has no mast there. Flagged "seed"; placeholders, not infrastructure.`,
   };
 }

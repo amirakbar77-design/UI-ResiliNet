@@ -3,21 +3,18 @@
  * road graph at a few flood levels, so reachability can be sanity-checked
  * without the UI. Uses the same cut rule as the renderer (lib/routing.ts).
  *
- *   node scripts/check-routes.mjs [level ...]   (metres; default 2 6 10)
+ *   node scripts/check-routes.mjs [mapId] [level ...]   (metres; default 2 6 10)
  */
 
-import { readFile } from 'node:fs/promises';
-import path from 'node:path';
 import { edgeCutAt, routeFrom } from '../lib/routing.ts';
+import { loadMap, mapArg } from './load-map.mjs';
 
-const terrain = JSON.parse(
-  await readFile(path.resolve('public/terrain/terrain.json'), 'utf8'),
-);
-const graph = JSON.parse(
-  await readFile(path.resolve('public/terrain', terrain.roads.file), 'utf8'),
-);
+const { mapId, rest } = mapArg();
+const loaded = await loadMap(mapId);
+const terrain = loaded.terrain.meta;
+const graph = loaded.terrain.graph;
 
-const levels = process.argv.slice(2).map(Number).filter(Number.isFinite);
+const levels = rest.map(Number).filter(Number.isFinite);
 if (levels.length === 0) levels.push(2, 6, 10);
 
 console.log(

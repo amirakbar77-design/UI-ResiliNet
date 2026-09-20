@@ -3,42 +3,28 @@
  * the residual hole they leave, then the convoy options, the portable-tower
  * candidates with their microwave links, and the ranked plans:
  *
- *   node scripts/check-sites.mjs [gaugeMetres]   (default 27.0)
+ *   node scripts/check-sites.mjs [mapId] [gaugeMetres]
  */
 
-import { readFile } from 'node:fs/promises';
-import path from 'node:path';
 import { floodCurve } from '../lib/forecast.ts';
 import { assessNetwork, siteViewsheds } from '../lib/network.ts';
 import { baselineTopUps, convoyOptions, recommendPlans } from '../lib/recommend.ts';
 import { evaluateRoutes } from '../lib/routing.ts';
 import { assessSites } from '../lib/sites.ts';
+import { loadMap, mapArg } from './load-map.mjs';
 
-const gauge = Number(process.argv[2] ?? 27);
-const level = Math.min(14, Math.max(0.5, gauge - 25));
-const meta = JSON.parse(await readFile(path.resolve('public/terrain/terrain.json'), 'utf8'));
-const graph = JSON.parse(await readFile(path.resolve('public/terrain', meta.roads.file), 'utf8'));
-const forecast = JSON.parse(await readFile(path.resolve('public/forecast.json'), 'utf8'));
-const bin = async (file) => {
-  const b = await readFile(path.resolve('public/terrain', file));
-  return b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength);
-};
-const terrain = {
-  meta,
-  graph,
-  elevation: new Int16Array(await bin('elevation.bin')),
-  hand: new Uint8Array(await bin('hand.bin')),
-  houses: new Float32Array(await bin(meta.houses.file)),
-  population: new Float32Array(await bin(meta.population.file)),
-  width: meta.grid.width,
-  height: meta.grid.height,
-};
-const curve = floodCurve(forecast, level);
+const { mapId, rest } = mapArg();
+const { map, terrain, forecast, river, levelOf } = await loadMap(mapId);
+const gauge = Number(rest[0] ?? map.gauge.initial);
+const level = levelOf(gauge);
+const meta = terrain.meta;
+console.log(`map ${mapId} · ${map.label} · ${map.gauge.station} ${gauge} m → flood level ${level.toFixed(2)} m`);
+const curve = floodCurve(forecast, level, river);
 const network = assessNetwork(terrain, curve);
 const plannedHour = network.outageHour ?? curve.peakHour();
 const masks = siteViewsheds(terrain);
 const { baseline, hole } = baselineTopUps(terrain, network, masks, plannedHour);
-const evaluation = evaluateRoutes(graph, meta.depot.node, level, curve.levels, curve.peakHour());
+const evaluation = evaluateRoutes(terrain.graph, meta.depot.node, level, curve.levels, curve.peakHour());
 const byId = new Map(meta.sites.map((s) => [s.id, s]));
 const convoys = convoyOptions(terrain, network, masks, hole, plannedHour, baseline, { level, levels: curve.levels });
 const survivors = new Set(network.liveAt(plannedHour));

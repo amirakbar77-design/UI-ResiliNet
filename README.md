@@ -15,9 +15,30 @@ npm run dev
 
 Open `http://localhost:3000`.
 
+## Two valleys
+
+The place chip above the layer panel switches between two baked areas. The engine is the same for both — routing, viewsheds, the network model, the recommendation and the population counts read only from the baked assets — so a valley is a bake plus an entry in `lib/maps.ts`.
+
+| | **Dabong – Kuala Krai** | **Beaufort & the Padas gorge** |
+|---|---|---|
+| River, state | Sungai Galas, Kelantan | Sungai Padas, Sabah |
+| Box | 101.88–102.28 °E, 5.26–5.60 °N | 115.52–115.92 °E, 5.12–5.46 °N |
+| Depot | Kuala Krai | Beaufort |
+| Gauge | Kuala Krai, danger 25.0 m | Beaufort, danger 8.70 m |
+| Highest reading used | 34.2 m (the Dec 2014 record) | 9.68 m (highest **found**, not a stated record) |
+| Rain inputs | scenario + three dated feeds | scenario only |
+| Hindcast | four checked 2014 facts | none — the app says so |
+| People (WorldPop) | 101,384 | 68,876 |
+
+**Why the Padas.** Beaufort is one of the most chronically flooded towns in Malaysia — it crosses its danger level most years, and the reports for those events describe dozens of villages inundated, thousands displaced and a declared disaster zone. It also carries the sharpest version of the problem this app exists for: the gorge villages of **Pangi, Rayoh and Halogilat have no road at all** and are reached only by the Sabah State Railway, the same railway the river can cut. Power loss has taken out supply to ~10,000 consumers across Beaufort and Tenom in a single flood.
+
+**Why the box stops short of Tenom.** No road crosses the Padas gorge; the driving route from Beaufort to Tenom loops far east via Keningau, well outside any box at this scale. An earlier, wider AOI put Tenom inside the frame, and the result was two disconnected road networks with every tower candidate stranded on the far side — the truck could reach none of them. The box now covers one connected road network plus the roadless gorge villages.
+
+**What the Padas map does not have.** No HydroBASINS trace, so its catchment mean is a tile mean rather than a basin mean, and the three dated feeds have no file for it. No rating curve and no checked historical event. Its river constants are illustrative and the method sheet states this instead of citing sources it does not have.
+
 ## The 3D terrain
 
-The map is a three.js scene built from real data for the Sungai Galas valley in Kelantan, from Gunung Stong and Dabong north-east to the Galas–Lebir confluence at Kuala Krai (101.88–102.28 °E, 5.26–5.60 °N, about 44 × 38 km):
+The map is a three.js scene built from real data. For the Sungai Galas valley in Kelantan, from Gunung Stong and Dabong north-east to the Galas–Lebir confluence at Kuala Krai (101.88–102.28 °E, 5.26–5.60 °N, about 44 × 38 km):
 
 - **Why this valley** — it is the scene of the December 2014 *Bah Kuning*, the worst flood in Kelantan's recorded history: the Galas rose roughly 18 m at Dabong, water reached the third floor of a school, the Kemubu railway bridge was swept away, Kampung Kemubu was out of contact for five days, and the Kuala Krai–Gua Musang road partially collapsed. In November 2024 MCMC reported seven transmitter stations and 42 internet hubs across Kelantan and Terengganu shut down by power loss and blocked access — the gap a portable tower is meant to fill. A confined valley with a 1,422 m massif beside it also makes the flood, the severed artery, and the line-of-sight coverage legible at a glance.
 - **Elevation** — NASA SRTM 1 arc-second (~30 m) from two tiles (N05E101, N05E102), rendered as a 720 × 612 mesh at ~62 m spacing with 2.6× vertical exaggeration.
@@ -35,7 +56,7 @@ Sources for the scenario narrative: [2014–15 Malaysia floods](https://en.wikip
 
 The dashboard walks an emergency communications officer through one decision in three stages.
 
-1. **Now.** The officer enters the Kuala Krai gauge reading (JPS InfoBanjir telemetry; danger level 25.0 m, 2014 record 34.2 m). Every metre above danger level is taken as a metre of water above the drainage datum — an illustrative mapping that a real deployment would replace with a rating curve — and the valley floods live.
+1. **Now.** The officer enters the gauge reading (JPS InfoBanjir telemetry; Kuala Krai danger level 25.0 m, 2014 record 34.2 m; Beaufort danger level 8.70 m). Each metre above danger level becomes a fixed number of metres of water above the drainage datum — an illustrative straight line that a real deployment would replace with a rating curve — and the valley floods live. The slope is 1 at Kuala Krai, where a gauge in a narrow valley channel climbs about as fast as the water deepens. It is 2.9 at Beaufort, where the channel is wide and flat: the whole sourced band above danger is roughly a metre, yet at 9.4–9.9 m the reports describe dozens of villages flooded and a declared disaster zone, which a 1:1 slope would render as a nuisance. That figure is anchored to reported impact, not to a rating curve we hold, and the method sheet says so.
 2. **Forecast.** The camera flies up to a top-down overview. An hourly rain forecast drifts over the catchment while a river-level timeline along the bottom shows the predicted curve with the peak pinned; settlement labels show how hard it is raining in each place. The officer picks the hour to plan for — the peak by default — and flies back down.
 3. **Site.** One **Start** button runs the evaluation in two visible phases. First the reachable road network lights up outward from the Kuala Krai depot at *today's* level, each road tinted by when the forecast will close it (green: open through the peak; amber: closes before the peak; rose: closes within two hours), with a red mark at every crossing the water has already taken. Then the candidates the truck can reach spawn one by one along the lit roads, each flashing its coverage and counting the homes it would reconnect. The best site gets the mast, its coverage fan, and a card; runners-up shrink to badges that preview their coverage on tap. No decision buttons — the map is the ranking.
 
@@ -113,7 +134,7 @@ Simplifications, stated on purpose: a topped-up or convoy-kept site does not rev
 
 ## December 2014 hindcast
 
-The flood everyone remembers is the check. Hindcast mode (the chip beside the clock) loads the ERA5-Land rain from 22 Dec 2014 06Z and sets the gauge to the recorded **34.2 m** peak (JPS Kuala Krai, 24–25 Dec), so the network model and the road graph are read at the peak. `lib/hindcast.ts` compares four reported facts with the model; the Now panel lists them in Hindcast mode and `node scripts/check-hindcast.mjs` prints the same table. The verdicts fall where they fall.
+Kelantan only; the Padas map has no checked event and the sheet says so rather than implying one. The flood everyone remembers is the check. Hindcast mode (the chip beside the clock) loads the ERA5-Land rain from 22 Dec 2014 06Z and sets the gauge to the recorded **34.2 m** peak (JPS Kuala Krai, 24–25 Dec), so the network model and the road graph are read at the peak. `lib/hindcast.ts` compares four reported facts with the model; the Now panel lists them in Hindcast mode and `node scripts/check-hindcast.mjs` prints the same table. The verdicts fall where they fall.
 
 | Reported | Source | Model at 34.2 m | Verdict |
 |---|---|---|---|
@@ -142,11 +163,15 @@ Drag to pan across the terrain. On a trackpad, pinch zooms toward the pointer, a
 
 ## Rebaking the terrain assets
 
-`public/terrain/` is committed so the app runs offline with no API key. To regenerate it:
+`public/terrain/` and `public/terrain-padas/` are committed so the app runs offline with no API key. To regenerate one:
 
 ```bash
-npm run bake:terrain
+npm run bake:terrain             # kelantan, the default
+npm run bake:terrain -- padas
+npm run forecast:scenario -- padas   # its design storm
 ```
+
+The areas of interest, their depots and their drainage thresholds live in the `MAPS` table at the top of `scripts/bake-terrain.mjs`; the runtime half of each entry (gauge, rain inputs, labels) lives in `lib/maps.ts`. Adding a valley means adding to both and running the two commands above. Overpass rate-limits and times out under load, so the bake retries with backoff, and its cache is namespaced per map.
 
 The script downloads its inputs once into `.cache/` (gitignored) and writes `elevation.bin`, `hand.bin`, `houses.bin`, `population.bin`, `roads.json`, `surface.jpg`, and `terrain.json`. `node scripts/check-hole.mjs` prints the hole in people next to the illustrative-house count it replaced.
 
@@ -173,6 +198,10 @@ npm run build
 node scripts/check-forecast.mjs live        # or replay-2024 / hindcast-2014
 node scripts/check-network.mjs 27
 node scripts/check-hole.mjs
-node scripts/check-sites.mjs 27
 node scripts/check-hindcast.mjs
+
+# these two take an optional map id first, defaulting to kelantan
+node scripts/check-sites.mjs 27
+node scripts/check-sites.mjs padas 9.4
+node scripts/check-routes.mjs padas 2 3 5
 ```

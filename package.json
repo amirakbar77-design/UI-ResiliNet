@@ -9,6 +9,7 @@
     "dev": "vinext dev",
     "build": "vinext build",
     "bake:terrain": "node --env-file-if-exists=.env scripts/bake-terrain.mjs",
+    "forecast:scenario": "node scripts/make-forecast.mjs",
     "start": "wrangler dev --config dist/server/wrangler.json",
     "lint": "oxlint",
     "format": "oxfmt",

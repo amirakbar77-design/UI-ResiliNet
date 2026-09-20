@@ -5,7 +5,8 @@
  * Shared by the Now-stage block in Hindcast mode and scripts/check-hindcast.mjs.
  */
 
-import { GAUGE_DANGER } from './gauge.ts';
+import { handLevelToGauge } from './gauge.ts';
+import { MAPS, type GaugeSpec } from './maps.ts';
 import type { NetworkAssessment, NetworkSiteState } from './network.ts';
 import { edgeCutAt, routeFrom } from './routing.ts';
 import { metresPerDegreeLon, type TerrainData } from './terrain-field.ts';
@@ -42,8 +43,6 @@ export type HindcastCheck = {
 const metresBetween = (aLon: number, aLat: number, bLon: number, bLat: number) =>
   Math.hypot((aLon - bLon) * metresPerDegreeLon((aLat + bLat) / 2), (aLat - bLat) * 110_574);
 
-const gaugeOf = (level: number) => (GAUGE_DANGER + level).toFixed(1);
-
 const fate = (state: NetworkSiteState) =>
   state.status === 'down'
     ? 'down at the peak'
@@ -57,7 +56,10 @@ export function hindcastChecks(
   network: NetworkAssessment,
   masks: Map<string, ViewshedMask>,
   level: number,
+  /** The station these facts belong to; only Kuala Krai has checked ones. */
+  spec: GaugeSpec = MAPS.kelantan.gauge,
 ): HindcastCheck[] {
+  const gaugeOf = (value: number) => handLevelToGauge(value, spec).toFixed(1);
   const { meta, graph } = terrain;
   const checks: HindcastCheck[] = [];
   const kemubu = meta.places.find((p) => /kemubu/i.test(p.name)) ?? null;
