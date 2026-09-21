@@ -1,0 +1,22 @@
+{
+ "cc": "MMR, MYS, THA",
+ "composite_type": "3Day",
+ "countries": "Myanmar (Burma), Malaysia, Thailand",
+ "dfo_centroid_x": 99.516261,
+ "dfo_centroid_y": 8.024092,
+ "dfo_country": "Thailand",
+ "dfo_dead": 0,
+ "dfo_displaced": 1000,
+ "dfo_main_cause": "Monsoonal Rain",
+ "dfo_other_country": "",
+ "dfo_severity": 1,
+ "dfo_validation_type": "News",
+ "gfd_country_code": "['MY', 'TH', 'BM', 'SN']",
+ "gfd_country_name": "['MALAYSIA', 'THAILAND', 'BURMA', 'SINGAPORE']",
+ "glide_index": "",
+ "id": 4206,
+ "slope_threshold": 5,
+ "threshold_b1b2": 0.7,
+ "threshold_b7": 675,
+ "threshold_type": "standard"
+}

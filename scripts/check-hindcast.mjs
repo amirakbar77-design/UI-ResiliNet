@@ -36,7 +36,7 @@ const terrain = {
 
 const curve = floodCurve(forecast2014, level);
 const network = assessNetwork(terrain, curve);
-const masks = siteViewsheds(terrain);
+const masks = siteViewsheds(terrain); 
 const checks = hindcastChecks(terrain, network, masks, level);
 
 console.log(`December 2014 hindcast · gauge ${gauge.toFixed(1)} m (HAND ${level.toFixed(1)} m) · ${forecast2014.source}`);
