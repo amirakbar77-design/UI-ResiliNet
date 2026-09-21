@@ -10,7 +10,7 @@
 
 import type { ForecastMode } from './forecast.ts';
 
-export type MapId = 'kelantan' | 'padas';
+export type MapId = 'kelantan' | 'padas' | 'yenbai';
 
 export type GaugeSpec = {
   /** Station as JPS/DID names it, for the label above the input. */
@@ -156,6 +156,43 @@ export const MAPS: Record<MapId, MapSpec> = {
     // dated feeds have no file here. The chip shows only what exists.
     forecastModes: ['scenario'],
     forecastFiles: { scenario: '/forecast-padas.json' },
+    hindcast: false,
+    basinKm2: null,
+  },
+  yenbai: {
+    id: 'yenbai',
+    label: 'Yên Bái, Sông Thao (Red River), Vietnam',
+    short: 'Yên Bái',
+    sublabel: 'Sông Thao · Vietnam',
+    assetBase: '/terrain-yenbai',
+    sceneLabel:
+      'Interactive 3D terrain model of the Sông Thao valley at Yên Bái, northern Vietnam',
+    gauge: {
+      station: 'Yên Bái gauge',
+      // Vietnam grades river warnings as alarm levels I–III; III is the top.
+      danger: 32,
+      initial: 33.5,
+      // Typhoon Yagi, 16:00 on 10 Sep 2024: 3.73 m over alarm III and 1.31 m
+      // over the 1968 flood, the highest in the station's record.
+      peak: { metres: 35.73, label: 'Record 2024', record: true },
+      min: 28,
+      max: 37,
+      step: 0.1,
+      // The band above alarm III is about four metres wide, between the
+      // Kelantan's nine and Beaufort's one, so a metre at the gauge is taken
+      // as a metre on the plain, as at Kuala Krai. Illustrative.
+      metresPerGaugeMetre: 1,
+      // Set so the design storm peaks just under the station record, as the
+      // Kelantan storm does under its own: 0.04 lifts the opening 1.5 m to a
+      // peak about 95% of the 3.73 m band above alarm III. Illustrative.
+      runoffCoef: 0.04,
+      // A far larger, slower basin than either Malaysian valley: the Thao
+      // drains the Red River headwaters in Yunnan before it reaches here.
+      lagHours: 3,
+    },
+    // Scenario only: no basin trace and no WeatherNext run for the Thao yet.
+    forecastModes: ['scenario'],
+    forecastFiles: { scenario: '/forecast-yenbai.json' },
     hindcast: false,
     basinKm2: null,
   },

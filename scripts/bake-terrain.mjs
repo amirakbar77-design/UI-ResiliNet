@@ -30,7 +30,7 @@
  */
 
 import { createWriteStream } from 'node:fs';
-import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
 import { createGunzip } from 'node:zlib';
 import { pipeline } from 'node:stream/promises';
 import { Readable } from 'node:stream';
@@ -60,6 +60,8 @@ const MAPS = {
     // The OSM place node the convoy starts from: the downstream town with
     // the road and rail hub, which is where kit would actually be staged.
     depot: 'Kuala Krai',
+    // ISO3 of the WorldPop constrained raster the population is cropped from.
+    worldpop: 'MYS',
   },
   // The Sungai Padas in Sabah: the Beaufort floodplain and the gorge above it.
   // One SRTM tile. The gorge villages — Pangi, Rayoh, Halogilat — have no road
@@ -75,6 +77,19 @@ const MAPS = {
     // the channel threshold has to rise with it or every gully floods.
     drainageCells: 16000,
     depot: 'Beaufort',
+    worldpop: 'MYS',
+  },
+  // The Sông Thao (upper Red River) at Yên Bái, northern Vietnam. Typhoon Yagi
+  // put the gauge at 35.73 m on 10 Sep 2024, 3.73 m over alarm level III and
+  // 1.31 m over the 1968 record; 23,400 homes damaged in the province. The
+  // river runs NW→SE through the city with hills either side. Two SRTM tiles
+  // (the box straddles 105 °E).
+  yenbai: {
+    out: 'public/terrain-yenbai',
+    aoi: { west: 104.7, east: 105.1, south: 21.55, north: 21.89 },
+    drainageCells: 12000,
+    depot: 'Yên Bái',
+    worldpop: 'VNM',
   },
 };
 
@@ -110,13 +125,32 @@ async function exists(file) {
 
 async function download(url, destination, init) {
   if (await exists(destination)) return destination;
-  const response = await fetch(url, init);
-  if (!response.ok) {
-    throw new Error(`${response.status} ${response.statusText} for ${url}`);
+  // Slow hosts drop long transfers midway; a whole-file fetch cannot resume,
+  // so try again from the start a few times rather than losing the bake.
+  let lastError = null;
+  for (let attempt = 1; attempt <= 4; attempt += 1) {
+    try {
+      const response = await fetch(url, init);
+      if (!response.ok) {
+        throw new Error(`${response.status} ${response.statusText} for ${url}`);
+      }
+      const bytes = Buffer.from(await response.arrayBuffer());
+      const expected = Number(response.headers.get('content-length'));
+      if (expected && bytes.length !== expected) {
+        throw new Error(`short read: ${bytes.length} of ${expected} bytes for ${url}`);
+      }
+      await mkdir(path.dirname(destination), { recursive: true });
+      await writeFile(destination, bytes);
+      return destination;
+    } catch (error) {
+      lastError = error;
+      if (attempt < 4) {
+        log('download failed:', String(error?.message ?? error).slice(0, 90), `— retry ${attempt + 1}/4`);
+        await new Promise((resolve) => setTimeout(resolve, attempt * 10_000));
+      }
+    }
   }
-  await mkdir(path.dirname(destination), { recursive: true });
-  await writeFile(destination, Buffer.from(await response.arrayBuffer()));
-  return destination;
+  throw lastError;
 }
 
 // --- Elevation -------------------------------------------------------------
@@ -143,11 +177,16 @@ async function loadSrtm() {
       const response = await fetch(url);
       if (!response.ok) throw new Error(`SRTM ${response.status}`);
       await mkdir(CACHE, { recursive: true });
+      // Stream to a side file and rename only when the whole tile is down:
+      // a download killed midway must not be taken for a finished tile on
+      // the next run, which would bake a truncated elevation grid.
+      const part = `${hgt}.part`;
       await pipeline(
         Readable.fromWeb(response.body),
         createGunzip(),
-        createWriteStream(hgt),
+        createWriteStream(part),
       );
+      await rename(part, hgt);
     }
     const buffer = await readFile(hgt);
     log('SRTM tile loaded', tile.name, buffer.length, 'bytes');
@@ -490,6 +529,14 @@ async function bakeImagery() {
 
 // --- OpenStreetMap context -------------------------------------------------
 
+// The main instance first; the mirrors take over once it has failed twice.
+const OVERPASS_HOSTS = [
+  'https://overpass-api.de/api/interpreter',
+  'https://overpass-api.de/api/interpreter',
+  'https://overpass.kumi.systems/api/interpreter',
+  'https://overpass.private.coffee/api/interpreter',
+];
+
 async function overpass(query, cacheKey) {
   // Namespaced by map: the selectors are the same for every AOI, so an
   // unprefixed key would serve one valley's roads for another's.
@@ -497,27 +544,42 @@ async function overpass(query, cacheKey) {
   if (!(await exists(file))) {
     // Overpass rate-limits and times out under load (429, 504). Back off and
     // retry rather than losing a bake that is otherwise minutes from done.
+    // The main instance also drops the socket mid-reply on a heavy query,
+    // which surfaces as a thrown fetch error rather than a status code, so
+    // both are retried, and later attempts move to a public mirror.
     let text = null;
-    for (let attempt = 1; attempt <= 5 && text === null; attempt += 1) {
-      log('querying Overpass for', cacheKey, attempt > 1 ? `(attempt ${attempt})` : '');
-      const response = await fetch('https://overpass-api.de/api/interpreter', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-          'User-Agent': 'resilinet-3d-ui-concept/0.1 (build-time bake)',
-        },
-        body: new URLSearchParams({ data: query }),
-      });
-      if (response.ok) {
-        text = await response.text();
-      } else if ([429, 502, 503, 504].includes(response.status) && attempt < 5) {
+    let lastError = null;
+    for (let attempt = 1; attempt <= 6 && text === null; attempt += 1) {
+      const host = OVERPASS_HOSTS[Math.min(attempt - 1, OVERPASS_HOSTS.length - 1)];
+      log('querying Overpass for', cacheKey, attempt > 1 ? `(attempt ${attempt}, ${new URL(host).host})` : '');
+      try {
+        const response = await fetch(host, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'User-Agent': 'resilinet-3d-ui-concept/0.1 (build-time bake)',
+          },
+          body: new URLSearchParams({ data: query }),
+        });
+        if (response.ok) {
+          text = await response.text();
+          JSON.parse(text); // a truncated reply is not a reply
+        } else if ([429, 502, 503, 504].includes(response.status)) {
+          lastError = new Error(`Overpass ${response.status}`);
+        } else {
+          throw new Error(`Overpass ${response.status}`);
+        }
+      } catch (error) {
+        lastError = error;
+        text = null;
+      }
+      if (text === null && attempt < 6) {
         const wait = attempt * 20_000;
-        log('Overpass', response.status, `— waiting ${wait / 1000}s`);
+        log('Overpass failed:', String(lastError?.message ?? lastError).slice(0, 80), `— waiting ${wait / 1000}s`);
         await new Promise((resolve) => setTimeout(resolve, wait));
-      } else {
-        throw new Error(`Overpass ${response.status}`);
       }
     }
+    if (text === null) throw lastError ?? new Error('Overpass: no reply');
     await mkdir(CACHE, { recursive: true });
     await writeFile(file, text);
   }
@@ -691,7 +753,7 @@ async function bakeFuelSources(places, graph) {
   );
   const sources = [];
   for (const place of places) {
-    if (place.place === 'town') sources.push({ kind: 'town', name: place.name, lon: place.lon, lat: place.lat });
+    if ((place.place === 'town' || place.place === 'city')) sources.push({ kind: 'town', name: place.name, lon: place.lon, lat: place.lat });
   }
   for (const element of data.elements) {
     const lon = element.lon ?? element.center?.lon;
@@ -716,7 +778,7 @@ async function bakeFuelSources(places, graph) {
 function pickDepot(places, graph) {
   const name = MAP.depot;
   const place =
-    places.find((entry) => entry.name === name && entry.place === 'town') ??
+    places.find((entry) => entry.name === name && (entry.place === 'town' || entry.place === 'city')) ??
     places.find((entry) => entry.name === name);
   if (!place) throw new Error(`no "${name}" place node in the AOI`);
   let best = null;
@@ -735,7 +797,7 @@ function pickDepot(places, graph) {
 
 async function bakePlaces() {
   const data = await overpass(
-    `[out:json][timeout:60];node["place"~"^(town|village|hamlet|suburb)$"]["name"](${BBOX});out body;`,
+    `[out:json][timeout:60];node["place"~"^(city|town|village|hamlet|suburb)$"]["name"](${BBOX});out body;`,
     'places',
   );
   return data.elements
@@ -941,7 +1003,7 @@ function pickCandidates({ elevation, width, height }, hand, places, graph) {
   const anchors = places.map((place) => ({
     row: ((AOI.north - place.lat) / (AOI.north - AOI.south)) * height,
     col: ((place.lon - AOI.west) / (AOI.east - AOI.west)) * width,
-    scale: place.place === 'town' ? 1 / 3 : 1,
+    scale: (place.place === 'town' || place.place === 'city') ? 1 / 3 : 1,
   }));
   const radiusCells = CANDIDATE_SETTLEMENT_METRES / cellMetres;
 
@@ -1064,8 +1126,7 @@ function pickCandidates({ elevation, width, height }, hand, places, graph) {
 
 // WorldPop 2020, UN-adjusted, constrained to built-up areas, ~100 m. CC BY 4.0.
 // https://hub.worldpop.org/geodata/summary?id=49771
-const WORLDPOP_URL =
-  'https://data.worldpop.org/GIS/Population/Global_2000_2020_Constrained/2020/BSGM/MYS/mys_ppp_2020_UNadj_constrained.tif';
+const WORLDPOP_URL = `https://data.worldpop.org/GIS/Population/Global_2000_2020_Constrained/2020/BSGM/${MAP.worldpop}/${MAP.worldpop.toLowerCase()}_ppp_2020_UNadj_constrained.tif`;
 
 /**
  * Crops the WorldPop raster to the AOI and sums each ~100 m pixel into the
@@ -1073,7 +1134,7 @@ const WORLDPOP_URL =
  * count in the app is people, not illustrative houses.
  */
 async function bakePopulation(width, height) {
-  const file = path.join(CACHE, 'worldpop_mys_2020_unadj_constrained.tif');
+  const file = path.join(CACHE, `worldpop_${MAP.worldpop.toLowerCase()}_2020_unadj_constrained.tif`);
   if (!(await exists(file))) log('downloading WorldPop', WORLDPOP_URL);
   await download(WORLDPOP_URL, file);
   const tiff = await geotiffFromFile(file);
@@ -1386,7 +1447,7 @@ function buildSites(raw, grid, hand, places, graph, depot) {
     }
   }
 
-  const town = places.find((p) => p.name === MAP.depot && p.place === 'town') ?? depot;
+  const town = places.find((p) => p.name === MAP.depot && (p.place === 'town' || p.place === 'city')) ?? depot;
   const nearestPlace = (site) => {
     let best = null;
     for (const place of places) {

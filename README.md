@@ -15,26 +15,29 @@ npm run dev
 
 Open `http://localhost:3000`.
 
-## Two valleys
+## Three valleys, two countries
 
-The place chip above the layer panel switches between two baked areas. The engine is the same for both — routing, viewsheds, the network model, the recommendation and the population counts read only from the baked assets — so a valley is a bake plus an entry in `lib/maps.ts`.
+The place chip above the layer panel switches between three baked areas. The engine is the same for all of them — routing, viewsheds, the network model, the recommendation and the population counts read only from the baked assets — so a valley is a bake plus an entry in `lib/maps.ts`. The third is outside Malaysia on purpose: every input is a global open dataset, and the Vietnamese valley is the proof.
 
-| | **Dabong – Kuala Krai** | **Beaufort & the Padas gorge** |
-|---|---|---|
-| River, state | Sungai Galas, Kelantan | Sungai Padas, Sabah |
-| Box | 101.88–102.28 °E, 5.26–5.60 °N | 115.52–115.92 °E, 5.12–5.46 °N |
-| Depot | Kuala Krai | Beaufort |
-| Gauge | Kuala Krai, danger 25.0 m | Beaufort, danger 8.70 m |
-| Highest reading used | 34.2 m (the Dec 2014 record) | 9.68 m (highest **found**, not a stated record) |
-| Rain inputs | scenario + three dated feeds | scenario only |
-| Hindcast | four checked 2014 facts | none — the app says so |
-| People (WorldPop) | 101,384 | 68,876 |
+| | **Dabong – Kuala Krai** | **Beaufort & the Padas gorge** | **Yên Bái** |
+|---|---|---|---|
+| River, country | Sungai Galas, Kelantan, Malaysia | Sungai Padas, Sabah, Malaysia | Sông Thao (upper Red River), Vietnam |
+| Box | 101.88–102.28 °E, 5.26–5.60 °N | 115.52–115.92 °E, 5.12–5.46 °N | 104.70–105.10 °E, 21.55–21.89 °N |
+| Depot | Kuala Krai | Beaufort | Yên Bái |
+| Gauge | Kuala Krai, danger 25.0 m | Beaufort, danger 8.70 m | Yên Bái, alarm level III 32.0 m |
+| Highest reading used | 34.2 m (the Dec 2014 record) | 9.68 m (highest **found**, not a stated record) | 35.73 m (the Sep 2024 record, Typhoon Yagi) |
+| Rain inputs | scenario + three dated feeds | scenario only | scenario only |
+| Hindcast | four checked 2014 facts | none — the app says so | none — the app says so |
+| People (WorldPop) | 101,384 | 68,876 | 374,352 |
+| OSM buildings in the box | 278 | 1,194 | 11,260 |
+
+**Why Yên Bái.** Typhoon Yagi (September 2024) is the largest telecommunications outage from a flood in recent ASEAN memory: Vietnam's Ministry of Information and Communications counted **6,285 mobile base stations** knocked out across 15 provinces, with 3,010 brought back on generators and full restoration "dependent on the re-establishment of grid power" — which is this app's failure model, stated by a regulator. At the Yên Bái gauge the Sông Thao reached **35.73 m at 16:00 on 10 September**, 3.73 m over alarm level III and 1.31 m above the 1968 flood, the highest in the station's record; the province declared an emergency with 23,400 homes damaged. The city sits where the river leaves the hills, so the valley has the relief the candidate rule needs and a single connected road network with the depot on it. WorldPop's Vietnam raster is the same product as Malaysia's, so the counts are comparable.
 
 **Why the Padas.** Beaufort is one of the most chronically flooded towns in Malaysia — it crosses its danger level most years, and the reports for those events describe dozens of villages inundated, thousands displaced and a declared disaster zone. It also carries the sharpest version of the problem this app exists for: the gorge villages of **Pangi, Rayoh and Halogilat have no road at all** and are reached only by the Sabah State Railway, the same railway the river can cut. Power loss has taken out supply to ~10,000 consumers across Beaufort and Tenom in a single flood.
 
 **Why the box stops short of Tenom.** No road crosses the Padas gorge; the driving route from Beaufort to Tenom loops far east via Keningau, well outside any box at this scale. An earlier, wider AOI put Tenom inside the frame, and the result was two disconnected road networks with every tower candidate stranded on the far side — the truck could reach none of them. The box now covers one connected road network plus the roadless gorge villages.
 
-**What the Padas map does not have.** No HydroBASINS trace, so its catchment mean is a tile mean rather than a basin mean, and the three dated feeds have no file for it. No rating curve and no checked historical event. Its river constants are illustrative and the method sheet states this instead of citing sources it does not have.
+**What the Padas and Yên Bái maps do not have.** No HydroBASINS trace, so its catchment mean is a tile mean rather than a basin mean, and the three dated feeds have no file for it. No rating curve and no checked historical event. Its river constants are illustrative and the method sheet states this instead of citing sources it does not have.
 
 ## The 3D terrain
 
@@ -168,7 +171,9 @@ Drag to pan across the terrain. On a trackpad, pinch zooms toward the pointer, a
 ```bash
 npm run bake:terrain             # kelantan, the default
 npm run bake:terrain -- padas
+npm run bake:terrain -- yenbai       # Vietnam: pulls the VNM WorldPop raster instead of MYS
 npm run forecast:scenario -- padas   # its design storm
+npm run forecast:scenario -- yenbai
 ```
 
 The areas of interest, their depots and their drainage thresholds live in the `MAPS` table at the top of `scripts/bake-terrain.mjs`; the runtime half of each entry (gauge, rain inputs, labels) lives in `lib/maps.ts`. Adding a valley means adding to both and running the two commands above. Overpass rate-limits and times out under load, so the bake retries with backoff, and its cache is namespaced per map.

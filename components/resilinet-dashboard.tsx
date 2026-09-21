@@ -466,6 +466,7 @@ function TerrainStage({
   winnerId,
   previewId,
   onPreview,
+  onNextCandidate,
   siteStates,
   onSiteTap,
   convoyId,
@@ -487,6 +488,7 @@ function TerrainStage({
   winnerId: string | null;
   previewId: string | null;
   onPreview: (id: string) => void;
+  onNextCandidate: () => void;
   siteStates: Record<string, SiteMarkerState>;
   onSiteTap: (id: string) => void;
   convoyId: string | null;
@@ -515,6 +517,7 @@ function TerrainStage({
           winnerId={winnerId}
           previewId={previewId}
           onPreview={onPreview}
+          onNextCandidate={onNextCandidate}
           siteStates={siteStates}
           onSiteTap={onSiteTap}
           convoyId={convoyId}
@@ -817,7 +820,9 @@ const CHART_MR = 14;
 const CHART_MT = 26;
 const CHART_MB = 18;
 const HOUR_STEP = 0.25;
-const PLAY_HOURS_PER_SECOND = 2;
+const PLAY_HOURS_PER_SECOND = 3;
+/** How long the one opening run takes, whatever the forecast horizon. */
+const PLAY_AUTO_SECONDS = 5;
 
 /**
  * The forecast control: the predicted river curve drawn over the catchment
@@ -902,7 +907,7 @@ function ForecastTimeline({
 
   // Playback is clocked on wall time, so a slow frame skips ahead rather
   // than stretching the run: a manual run moves 2 h/s and stops at the end;
-  // the opening run takes about eight seconds whatever the horizon, then
+  // the opening run takes PLAY_AUTO_SECONDS whatever the horizon, then
   // hands the hour back to the parent's planning default.
   const playOrigin = useRef<{ at: number; hour: number } | null>(null);
   useEffect(() => {
@@ -910,7 +915,9 @@ function ForecastTimeline({
       playOrigin.current = null;
       return;
     }
-    const hoursPerSecond = auto ? Math.max(PLAY_HOURS_PER_SECOND, maxHour / 8) : PLAY_HOURS_PER_SECOND;
+    const hoursPerSecond = auto
+      ? Math.max(PLAY_HOURS_PER_SECOND, maxHour / PLAY_AUTO_SECONDS)
+      : PLAY_HOURS_PER_SECOND;
     playOrigin.current ??= { at: performance.now(), hour };
     const origin = playOrigin.current;
     const id = setTimeout(() => {
@@ -1385,6 +1392,7 @@ function RecommendationCard({
 
 function RouteControls({
   depotName,
+  onNextCandidate,
   route,
   ready,
   plannedClock,
@@ -1395,6 +1403,7 @@ function RouteControls({
   onSkip,
 }: {
   depotName: string;
+  onNextCandidate: () => void;
   route: RouteState | null;
   ready: boolean;
   plannedClock: string;
@@ -1431,6 +1440,20 @@ function RouteControls({
           className="mt-2 min-h-10 w-full rounded-lg text-xs font-semibold tracking-[0.06em] text-sky-200 uppercase hover:bg-slate-800 hover:text-white"
         >
           Skip animation
+        </button>
+      )}
+      {route?.sitesDone && route.winnerId !== null && (
+        // The same step the winner card takes, from a control that stays on
+        // screen however far the camera has glided.
+        <button
+          type="button"
+          onClick={onNextCandidate}
+          className="mt-2 flex min-h-10 w-full items-center justify-center gap-2 rounded-lg border border-sky-300/30 bg-sky-500/10 text-xs font-semibold tracking-[0.06em] text-sky-100 uppercase transition-colors hover:bg-sky-500/20"
+        >
+          Next candidate
+          <span className="rounded-full bg-sky-400/20 px-2 py-0.5 text-[10px] tabular-nums normal-case tracking-normal text-sky-200">
+            {candidateOrder(route).indexOf(route.previewId ?? route.winnerId) + 1} of {candidateOrder(route).length}
+          </span>
         </button>
       )}
       {route && (
@@ -1511,6 +1534,7 @@ function StageContent({
   onStartRoutes,
   onSkipRoutes,
   onNext,
+  onNextCandidate,
   onClose,
 }: StageProps & { onClose?: () => void }) {
   const index = stages.findIndex((entry) => entry.key === stage);
@@ -1565,6 +1589,7 @@ function StageContent({
         {stage === 'site' && (
           <RouteControls
             depotName={depotName}
+            onNextCandidate={onNextCandidate}
             route={route}
             ready={routesReady}
             plannedClock={plannedClock}
@@ -1578,6 +1603,23 @@ function StageContent({
       </div>
     </div>
   );
+}
+
+/**
+ * The order the candidates are walked in: the winner first, then every
+ * spawned runner-up by people reconnected. Shared by the cycle and the panel
+ * so "3 of 7" and the next click can never disagree.
+ */
+function candidateOrder(route: RouteState): string[] {
+  const winner = route.winnerId;
+  if (winner === null) return [];
+  return [
+    winner,
+    ...route.sites
+      .filter((s) => s.id !== winner && route.spawned.includes(s.id))
+      .sort((a, b) => b.peopleReconnected - a.peopleReconnected)
+      .map((s) => s.id),
+  ];
 }
 
 type RouteState = {
@@ -1628,6 +1670,8 @@ type StageProps = {
   onStartRoutes: () => void;
   onSkipRoutes: () => void;
   onNext: () => void;
+  /** Steps the map's preview to the next-ranked candidate. */
+  onNextCandidate: () => void;
 };
 
 function InterventionPanel({
@@ -2148,6 +2192,23 @@ export function ResilinetDashboard() {
       ),
     [],
   );
+  /**
+   * Steps the preview through the candidates in rank order — the winner, then
+   * the runners-up by people reconnected — and back to the winner, so one
+   * click at a time walks through every alternative on the map.
+   */
+  const onNextCandidate = useCallback(
+    () =>
+      setRoute((current) => {
+        if (!current || !current.sitesDone || current.winnerId === null) return current;
+        const winner = current.winnerId;
+        const order = candidateOrder(current);
+        const at = current.previewId ?? winner;
+        const next = order[(order.indexOf(at) + 1) % order.length] ?? winner;
+        return { ...current, previewId: next === winner ? null : next };
+      }),
+    [],
+  );
   const routeRun: RouteRun | null = useMemo(
     () =>
       route
@@ -2175,6 +2236,7 @@ export function ResilinetDashboard() {
   const stageProps: StageProps = {
     map,
     depotName: terrain?.meta.depot.name ?? map.short,
+    onNextCandidate,
     stage,
     gauge,
     setGauge,
@@ -2211,6 +2273,7 @@ export function ResilinetDashboard() {
         winnerId={route?.sitesDone ? route.winnerId : null}
         previewId={route?.previewId ?? null}
         onPreview={onPreview}
+        onNextCandidate={onNextCandidate}
         siteStates={siteStates}
         onSiteTap={onSiteTap}
         convoyId={convoyId}

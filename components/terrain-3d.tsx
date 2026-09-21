@@ -63,9 +63,11 @@ const RAIN_STORM_MM = 40; // ≥ this reads as a storm core
 const WAVE_DURATION_MS = 9000;
 const WAVE_HOT_KM = 2.5; // the leading edge glows white-hot for this far behind the front
 const GLOW_WIDTH_FACTOR = 3; // neon halo width relative to the road ribbon
-const SPAWN_INTERVAL_MS = 500; // gap between candidate rings appearing
-const SPAWN_RING_MS = 450; // ring grow-in
-const SPAWN_PULSE_MS = 1100; // coverage fan flash
+// Roughly half the original pacing: each candidate still lands as a distinct
+// beat, but a valley with a dozen reachable sites no longer stalls the demo.
+const SPAWN_INTERVAL_MS = 260; // gap between candidate rings appearing
+const SPAWN_RING_MS = 240; // ring grow-in
+const SPAWN_PULSE_MS = 600; // coverage fan flash
 const WAVE_SOON_HOURS = 2; // lit roads closing within this read red; those closing before the peak amber
 const MAX_PLACE_MARKERS = 4;
 // Homes are drawn about three times their true footprint so a kampung still
@@ -771,7 +773,10 @@ function createScene(
     if (!spawn || spawn.done) return;
     while (spawn.next < spawn.sites.length && now >= spawn.nextAt) {
       spawnOne(now);
-      spawn.nextAt = now + SPAWN_INTERVAL_MS;
+      // Advance the schedule, not the clock: re-basing on `now` would add a
+      // whole frame to every gap, so the sequence stretched on a slow
+      // renderer instead of holding its pace.
+      spawn.nextAt += SPAWN_INTERVAL_MS;
     }
     let settling = false;
     for (const entry of spawn.active) {
@@ -1789,6 +1794,42 @@ function createScene(
   };
   document.addEventListener('visibilitychange', onVisibility);
 
+  // Where the winning mast stands, so a cleared preview can glide back to it.
+  let winnerBase: THREE.Vector3 | null = null;
+  /** Glide in on a point from the current bearing, close enough to read a fan. */
+  function glideTo(target: THREE.Vector3) {
+    const bearing = new THREE.Vector3()
+      .subVectors(camera.position, controls.target)
+      .setY(0);
+    if (bearing.lengthSq() < 1e-6) bearing.set(1, 0, 1);
+    bearing.normalize().setY(0.55).normalize();
+    const toPosition = target
+      .clone()
+      .add(bearing.multiplyScalar(orbitDistance * 0.34));
+    zoomActive = false;
+    zoomAnchorValid = false;
+    orbitPending = 0;
+    flyPending = 0;
+    lastInteraction = performance.now();
+    if (reduceMotion?.matches) {
+      flight = null;
+      camera.position.copy(toPosition);
+      controls.target.copy(target);
+      controls.update();
+      return;
+    }
+    controls.enabled = false;
+    flight = {
+      to: 'site',
+      fromPosition: camera.position.clone(),
+      fromTarget: controls.target.clone(),
+      toPosition,
+      toTarget: target,
+      fromSun: sun.intensity,
+      elapsed: 0,
+    };
+  }
+
   return {
     setLayers(layers) {
       layerState = layers;
@@ -1846,7 +1887,10 @@ function createScene(
     },
     showWinner(site) {
       disposeGroup(winnerGroup);
-      if (!site) return;
+      if (!site) {
+        winnerBase = null;
+        return;
+      }
       const base = worldOf(site.candidate.lon, site.candidate.lat);
       const winnerMast = new THREE.Mesh(mast.geometry.clone(), mastMaterial.clone());
       winnerMast.position.set(base.x, base.y + mastHeight / 2, base.z);
@@ -1881,38 +1925,8 @@ function createScene(
         winnerGroup.add(line);
       }
 
-      // Glide in from the current bearing, close enough to read the fan.
-      const target = base.clone();
-      const bearing = new THREE.Vector3()
-        .subVectors(camera.position, controls.target)
-        .setY(0);
-      if (bearing.lengthSq() < 1e-6) bearing.set(1, 0, 1);
-      bearing.normalize().setY(0.55).normalize();
-      const toPosition = target
-        .clone()
-        .add(bearing.multiplyScalar(orbitDistance * 0.34));
-      zoomActive = false;
-      zoomAnchorValid = false;
-      orbitPending = 0;
-      flyPending = 0;
-      lastInteraction = performance.now();
-      if (reduceMotion?.matches) {
-        flight = null;
-        camera.position.copy(toPosition);
-        controls.target.copy(target);
-        controls.update();
-        return;
-      }
-      controls.enabled = false;
-      flight = {
-        to: 'site',
-        fromPosition: camera.position.clone(),
-        fromTarget: controls.target.clone(),
-        toPosition,
-        toTarget: target,
-        fromSun: sun.intensity,
-        elapsed: 0,
-      };
+      winnerBase = base.clone();
+      glideTo(base.clone());
     },
     frameRouteWave() {
       if (view !== 'site' || flight || reduceMotion?.matches) return;
@@ -1987,8 +2001,13 @@ function createScene(
     },
     previewSite(site) {
       disposeGroup(previewGroup);
-      if (!site) return;
+      if (!site) {
+        // Stepping past the last runner-up lands back on the winner.
+        if (winnerBase && view === 'site') glideTo(winnerBase.clone());
+        return;
+      }
       previewGroup.add(buildFan(site.candidate, site.mask, previewTint));
+      glideTo(worldOf(site.candidate.lon, site.candidate.lat));
     },
     clearRouteWave() {
       clearWave();
@@ -2131,6 +2150,7 @@ export function Terrain3D({
   winnerId,
   previewId,
   onPreview,
+  onNextCandidate,
   siteStates,
   onSiteTap,
   convoyId,
@@ -2158,6 +2178,8 @@ export function Terrain3D({
   /** A runner-up whose coverage is being previewed. */
   previewId: string | null;
   onPreview: (id: string) => void;
+  /** Steps the preview to the next-ranked candidate, wrapping back to the winner. */
+  onNextCandidate: () => void;
   /** Existing-site status by site id; tapping a marker cycles its override. */
   siteStates: Record<string, SiteMarkerState>;
   onSiteTap: (id: string) => void;
@@ -2359,37 +2381,47 @@ export function Terrain3D({
                   </span>
                 </div>
               ) : anchor.kind === 'candidate' && anchor.id === winnerId ? (
-                <div className="flex -translate-x-1/2 -translate-y-full flex-col items-center">
-                  <div className="mb-2 whitespace-nowrap rounded-lg border border-emerald-300/45 bg-[#07131d]/92 px-3 py-2 shadow-xl backdrop-blur-md">
-                    <div className="text-[10px] font-semibold tracking-[0.12em] text-emerald-300 uppercase">
+                // Tapping the winner steps through the runners-up in rank order
+                // and back: one control to walk a room through the alternatives.
+                <button
+                  type="button"
+                  onClick={onNextCandidate}
+                  title="Show the next candidate"
+                  className="pointer-events-auto flex -translate-x-1/2 -translate-y-full cursor-pointer flex-col items-center text-left"
+                >
+                  <span className="mb-2 block whitespace-nowrap rounded-lg border border-emerald-300/45 bg-[#07131d]/92 px-3 py-2 shadow-xl backdrop-blur-md transition-colors hover:border-emerald-200/80">
+                    <span className="block text-[10px] font-semibold tracking-[0.12em] text-emerald-300 uppercase">
                       Best site
-                    </div>
-                    <div className="flex items-center gap-2 text-sm font-semibold text-white">
+                    </span>
+                    <span className="flex items-center gap-2 text-sm font-semibold text-white">
                       <RadioTower className="size-4 text-emerald-300" aria-hidden />
                       {anchor.label}
-                    </div>
-                    <div className="mt-0.5 pl-6 text-xs text-emerald-100/85 tabular-nums">
+                    </span>
+                    <span className="mt-0.5 block pl-6 text-xs text-emerald-100/85 tabular-nums">
                       reconnects {(site?.peopleReconnected ?? 0).toLocaleString()} people without signal
-                    </div>
+                    </span>
                     {/* The coordinate a crew would actually drive to. Five
                         decimals is about a metre, which is finer than the 30 m
                         DEM the site was picked from, but it is what a handheld
                         GPS and every mapping app expect to be given. */}
-                    <div className="mt-1 pl-6 text-[11px] text-slate-300 tabular-nums">
+                    <span className="mt-1 block pl-6 text-[11px] text-slate-300 tabular-nums">
                       {anchor.lat.toFixed(5)}, {anchor.lon.toFixed(5)}
-                    </div>
-                  </div>
-                  <div className="grid size-9 place-items-center rounded-full border-2 border-white bg-emerald-400 text-emerald-950 shadow-[0_0_0_7px_rgb(52_211_153/22%)]">
+                    </span>
+                    <span className="mt-1.5 block pl-6 text-[10px] font-semibold tracking-[0.08em] text-sky-300 uppercase">
+                      Tap for the next candidate
+                    </span>
+                  </span>
+                  <span className="grid size-9 place-items-center rounded-full border-2 border-white bg-emerald-400 text-emerald-950 shadow-[0_0_0_7px_rgb(52_211_153/22%)]">
                     <RadioTower className="size-4" aria-hidden />
-                  </div>
-                </div>
+                  </span>
+                </button>
               ) : anchor.kind === 'candidate' && winnerId !== null ? (
                 // Runner-up: a muted badge with its count; tap to preview coverage.
                 <button
                   type="button"
-                  onClick={() => onPreview(anchor.id)}
+                  onClick={() => (previewId === anchor.id ? onNextCandidate() : onPreview(anchor.id))}
                   aria-pressed={previewId === anchor.id}
-                  title={`${anchor.label}: reconnects ${(site?.peopleReconnected ?? 0).toLocaleString()} people without signal`}
+                  title={`${anchor.label}: reconnects ${(site?.peopleReconnected ?? 0).toLocaleString()} people without signal${previewId === anchor.id ? ' — tap for the next candidate' : ''}`}
                   className={`pointer-events-auto flex min-h-7 -translate-x-1/2 -translate-y-1/2 items-center gap-1.5 whitespace-nowrap rounded-full border px-2 text-[11px] font-semibold tabular-nums backdrop-blur-sm transition-colors ${
                     previewId === anchor.id
                       ? 'border-sky-300/60 bg-sky-500/30 text-white'
@@ -2397,6 +2429,10 @@ export function Terrain3D({
                   }`}
                 >
                   <span className="size-1.5 rounded-full bg-current opacity-70" />
+                  {previewId === anchor.id && (
+                    // Named while it is the one on show, so the room can follow.
+                    <span className="font-semibold">{anchor.label} ·</span>
+                  )}
                   {(site?.peopleReconnected ?? 0).toLocaleString()}
                 </button>
               ) : anchor.kind === 'candidate' ? (

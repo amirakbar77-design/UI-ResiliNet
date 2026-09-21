@@ -46,6 +46,23 @@ const MAPS = {
       note: 'the demo opens at 27.0 m, two metres above danger level',
     },
   },
+  yenbai: {
+    terrain: 'public/terrain-yenbai/terrain.json',
+    out: 'public/forecast-yenbai.json',
+    issuedAt: '2024-09-08T14:00:00+07:00',
+    station: 'Yên Bái, Sông Thao',
+    // Yagi's rain came off the north-western highlands and the Thao carries
+    // it south-east through the city: the band forms up-valley and drifts
+    // down it, over Yên Bái and on toward Phú Thọ.
+    track: { start: { x: 0.12, y: 0.9 }, end: { x: 0.88, y: 0.12 } },
+    source:
+      'Design storm (synthetic, for demonstration): a convective band forming over the north-western hills and drifting south-east down the Sông Thao through Yên Bái, peaking at hour 6',
+    gauge: {
+      reading: null,
+      station: 'Yên Bái (Sông Thao), alarm level III 32.0 m',
+      note: 'the demo opens at 33.5 m, 1.5 m above alarm level III',
+    },
+  },
   padas: {
     terrain: 'public/terrain-padas/terrain.json',
     out: 'public/forecast-padas.json',
