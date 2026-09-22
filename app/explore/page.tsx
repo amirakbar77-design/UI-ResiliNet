@@ -1,5 +1,5 @@
 import { ResilinetDashboard } from '@/components/resilinet-dashboard';
 
-export default function Home() {
-  return <ResilinetDashboard guided />;
+export default function Explore() {
+  return <ResilinetDashboard />;
 }

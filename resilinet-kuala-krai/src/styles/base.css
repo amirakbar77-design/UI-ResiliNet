@@ -1,0 +1,75 @@
+/* Reset and the primitives every region shares. */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--surface-recessed);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: var(--text-body);
+  line-height: var(--leading-body);
+  /* The page itself never scrolls: the console is exactly one viewport. */
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Every figure in the application, aligned on the decimal. */
+.numeric {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}
+
+/* Section labels: the only uppercase in the application. */
+.label {
+  font-size: var(--text-micro);
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+/* A neutral, high-contrast ring. Deliberately not the accent: the accent
+   means the network or the primary action, and a focus ring means neither. */
+:focus-visible {
+  outline: var(--focus-ring-width) solid var(--text-primary);
+  outline-offset: 2px;
+}
+:focus:not(:focus-visible) {
+  outline: none;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+button[aria-disabled="true"] {
+  cursor: default;
+  color: var(--text-muted);
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}

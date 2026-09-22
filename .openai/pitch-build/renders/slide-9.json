@@ -1,0 +1,610 @@
+{
+  "schema": "openai.presentation.layout/v4",
+  "unit": "px",
+  "slide": {
+    "aid": "sl/th2r8b",
+    "id": "th2r8b",
+    "slide": 9,
+    "layoutId": "413c5c0f-aadc-4681-92f1-622bbaee9e3e",
+    "layoutName": "Title Slide",
+    "layoutType": "title",
+    "masterLayoutId": "7a892ff9-f1c7-43d4-b10d-83e76a384619",
+    "masterLayoutName": "Master",
+    "backgroundColor": "#FAFAF7",
+    "frame": {
+      "left": 0,
+      "top": 0,
+      "width": 1600,
+      "height": 900
+    }
+  },
+  "theme": {
+    "colorSchemeName": "ChatGPT",
+    "colors": {
+      "accent1": "#156082",
+      "accent2": "#E97132",
+      "accent3": "#196B24",
+      "accent4": "#0F9ED5",
+      "accent5": "#A02B93",
+      "accent6": "#4EA72E",
+      "bg1": "#FFFFFF",
+      "bg2": "#000000",
+      "tx1": "#1F1F1F",
+      "tx2": "#FFFFFF",
+      "dk1": "#000000",
+      "lt1": "#FFFFFF",
+      "dk2": "#0E2841",
+      "lt2": "#E8E8E8",
+      "hlink": "#467886",
+      "folHlink": "#96607D"
+    },
+    "typefaces": [
+      "Helvetica Neue"
+    ]
+  },
+  "inheritedLayers": [
+    {
+      "scope": "layout",
+      "id": "413c5c0f-aadc-4681-92f1-622bbaee9e3e",
+      "name": "Title Slide",
+      "type": "title",
+      "parentLayoutId": "7a892ff9-f1c7-43d4-b10d-83e76a384619",
+      "elements": []
+    },
+    {
+      "scope": "master",
+      "id": "7a892ff9-f1c7-43d4-b10d-83e76a384619",
+      "name": "Master",
+      "type": "master",
+      "elements": []
+    }
+  ],
+  "elements": [
+    {
+      "order": 1,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/8v6lsra9",
+      "id": "1",
+      "name": "When a tower fails, the plan changes",
+      "bbox": [
+        80,
+        62,
+        1440,
+        150
+      ],
+      "geometry": "rect",
+      "text": "When a tower fails, the plan changes",
+      "textPreview": "When a tower fails, the plan changes",
+      "resolvedFontSize": 58.71,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 58.71,
+        "typeface": "Helvetica Neue",
+        "color": "#111827",
+        "bold": true,
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "square",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "When a tower fails, the plan changes"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "When a tower fails, the plan changes",
+          "resolvedTextStyle": {
+            "fontSize": 58.71,
+            "typeface": "Helvetica Neue",
+            "color": "#111827",
+            "bold": true,
+            "alignment": "left"
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "When a tower fails, the plan changes",
+              "fontSize": 58.71,
+              "typeface": "Helvetica Neue",
+              "color": "#111827",
+              "bold": true,
+              "alignment": "left"
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 2,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/nux4zm9o",
+      "id": "2",
+      "name": "1",
+      "bbox": [
+        82,
+        202,
+        410,
+        393
+      ],
+      "geometry": "rect",
+      "text": "1",
+      "textPreview": "1",
+      "resolvedFontSize": 340,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 340,
+        "typeface": "Helvetica Neue",
+        "color": "#1D4ED8",
+        "bold": true,
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "square",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "1"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "1",
+          "resolvedTextStyle": {
+            "fontSize": 4.53,
+            "typeface": "Helvetica Neue",
+            "color": "#1D4ED8",
+            "bold": true,
+            "alignment": "left"
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "1",
+              "fontSize": 4.53,
+              "typeface": "Helvetica Neue",
+              "color": "#1D4ED8",
+              "bold": true,
+              "alignment": "left"
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 3,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/mto3qhs3",
+      "id": "3",
+      "name": "new report",
+      "bbox": [
+        105,
+        607,
+        510,
+        67
+      ],
+      "geometry": "rect",
+      "text": "new report",
+      "textPreview": "new report",
+      "resolvedFontSize": 46,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 46,
+        "typeface": "Helvetica Neue",
+        "color": "#111827",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "square",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "new report"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "new report",
+          "resolvedTextStyle": {
+            "fontSize": 46,
+            "typeface": "Helvetica Neue",
+            "color": "#111827",
+            "alignment": "left"
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "new report",
+              "fontSize": 46,
+              "typeface": "Helvetica Neue",
+              "color": "#111827",
+              "alignment": "left"
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 4,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/x0zm5wrq",
+      "id": "4",
+      "name": "A new recommendation",
+      "bbox": [
+        690,
+        301,
+        805,
+        96
+      ],
+      "geometry": "rect",
+      "text": "A new recommendation",
+      "textPreview": "A new recommendation",
+      "resolvedFontSize": 58.71,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 58.71,
+        "typeface": "Helvetica Neue",
+        "color": "#111827",
+        "bold": true,
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "square",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "A new recommendation"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "A new recommendation",
+          "resolvedTextStyle": {
+            "fontSize": 58.71,
+            "typeface": "Helvetica Neue",
+            "color": "#111827",
+            "bold": true,
+            "alignment": "left"
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "A new recommendation",
+              "fontSize": 58.71,
+              "typeface": "Helvetica Neue",
+              "color": "#111827",
+              "bold": true,
+              "alignment": "left"
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 5,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/wz6lwra5",
+      "id": "5",
+      "name": "Watch the two-minute live demo",
+      "bbox": [
+        694,
+        436,
+        790,
+        110
+      ],
+      "geometry": "rect",
+      "text": "Watch the two-minute live demo",
+      "textPreview": "Watch the two-minute live demo",
+      "resolvedFontSize": 42,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 42,
+        "typeface": "Helvetica Neue",
+        "color": "#6B7280",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "square",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "Watch the two-minute live demo"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "Watch the two-minute live demo",
+          "resolvedTextStyle": {
+            "fontSize": 42,
+            "typeface": "Helvetica Neue",
+            "color": "#6B7280",
+            "alignment": "left"
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "Watch the two-minute live demo",
+              "fontSize": 42,
+              "typeface": "Helvetica Neue",
+              "color": "#6B7280",
+              "alignment": "left"
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 6,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/vyx43m90",
+      "id": "6",
+      "name": "Seeking an operator pilot: verified sites, ou",
+      "bbox": [
+        86,
+        757,
+        1430,
+        57
+      ],
+      "geometry": "rect",
+      "text": "Seeking an operator pilot: verified sites, outage logs, field checks.",
+      "textPreview": "Seeking an operator pilot: verified sites, outage logs, field checks.",
+      "resolvedFontSize": 32,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 32,
+        "typeface": "Helvetica Neue",
+        "color": "#1D4ED8",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "square",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "Seeking an operator pilot: verified sites, outage logs, field checks."
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "Seeking an operator pilot: verified sites, outage logs, field checks.",
+          "resolvedTextStyle": {
+            "fontSize": 32,
+            "typeface": "Helvetica Neue",
+            "color": "#1D4ED8",
+            "alignment": "left"
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "Seeking an operator pilot: verified sites, outage logs, field checks.",
+              "fontSize": 32,
+              "typeface": "Helvetica Neue",
+              "color": "#1D4ED8",
+              "alignment": "left"
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 7,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/axo3uhsf",
+      "id": "7",
+      "name": "Interactive prototype. Replanning time depend",
+      "bbox": [
+        80,
+        845,
+        1360,
+        29
+      ],
+      "geometry": "rect",
+      "text": "Interactive prototype. Replanning time depends on the device and scenario.",
+      "textPreview": "Interactive prototype. Replanning time depends on the device and scenario.",
+      "resolvedFontSize": 18.69,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 18.69,
+        "typeface": "Helvetica Neue",
+        "color": "#6B7280",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "square",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "Interactive prototype. Replanning time depends on the device and scenario."
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "Interactive prototype. Replanning time depends on the device and scenario.",
+          "resolvedTextStyle": {
+            "fontSize": 18.69,
+            "typeface": "Helvetica Neue",
+            "color": "#6B7280",
+            "alignment": "left"
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "Interactive prototype. Replanning time depends on the device and scenario.",
+              "fontSize": 18.69,
+              "typeface": "Helvetica Neue",
+              "color": "#6B7280",
+              "alignment": "left"
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 8,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/5ozm9gr2",
+      "id": "8",
+      "name": "09",
+      "bbox": [
+        1460,
+        845,
+        60,
+        30
+      ],
+      "geometry": "rect",
+      "text": "09",
+      "textPreview": "09",
+      "resolvedFontSize": 18.69,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 18.69,
+        "typeface": "Helvetica Neue",
+        "color": "#6B7280",
+        "alignment": "right",
+        "verticalAlignment": "top",
+        "wrap": "square",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "09"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "09",
+          "resolvedTextStyle": {
+            "fontSize": 18.69,
+            "typeface": "Helvetica Neue",
+            "color": "#6B7280",
+            "alignment": "right"
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "09",
+              "fontSize": 18.69,
+              "typeface": "Helvetica Neue",
+              "color": "#6B7280",
+              "alignment": "right"
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    }
+  ],
+  "composeRuns": []
+}

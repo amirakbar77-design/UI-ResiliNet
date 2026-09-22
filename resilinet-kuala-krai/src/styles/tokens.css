@@ -1,0 +1,159 @@
+/* ResiliNet 3D — design tokens.
+   Every colour, size, radius and duration in the application is defined here.
+   A component that hard-codes one of these values is a bug: see
+   docs/design-system.md for the rules these tokens encode. */
+
+:root {
+  /* ---- surfaces -------------------------------------------------------
+     A light near-neutral ramp. The chrome recedes to near-grey so the
+     terrain is the only saturated thing on screen. Regions are separated by
+     hairlines, never by shadow, and never stacked as cards on cards. */
+  --surface: #ffffff;
+  --surface-recessed: #f4f6f7;
+  --surface-sunken: #eceff1;
+  --hairline: #d8dde0;
+  --hairline-strong: #c3cacd;
+  --scrim: rgba(16, 23, 28, 0.28);
+
+  /* ---- text ---------------------------------------------------------- */
+  --text-primary: #10171c;
+  --text-secondary: #5a666e;
+  --text-muted: #8a949b;
+  --text-on-accent: #ffffff;
+
+  /* ---- accent ---------------------------------------------------------
+     ONE accent in the entire application, with exactly two permitted
+     meanings:
+       1. the network  — communication sites and their service approximation
+       2. the primary action — the single most important control in a region
+     Nothing else is ever teal. It must never be used for terrain, for water,
+     or for the flood surface, and it is not used for focus rings: a focus
+     ring is an affordance, not a meaning, so it takes a neutral outline. */
+  --accent: #0e7c86;
+  --accent-hover: #0b666e;
+  --accent-quiet: #e3f0f1;
+
+  /* ---- status ---------------------------------------------------------
+     An escalation ramp for the state of a site, road, facility or community.
+     Constrained to hues the naturalistic terrain does not own: the block
+     carries desaturated olive-green and ochre-brown, so these are pitched at
+     higher chroma and different hue to stay legible on top of it, and to
+     stay legible on a light ground. Colour never carries meaning alone —
+     every status colour is paired with its text label wherever it appears. */
+  --status-normal: #55707e;
+  --status-watch: #a8710c;
+  --status-at-risk: #bd5518;
+  --status-disrupted: #a32a2a;
+  --status-protected: #2f6d3f;
+  --status-unknown: #7c8791;
+
+  /* ---- evidence -------------------------------------------------------
+     One colour per evidence category from the standing rules. Deliberately a
+     different family from the status ramp — all low chroma, cool or neutral —
+     so provenance can never be mistaken for severity. Always rendered with
+     the category name in text beside it. */
+  --evidence-verified: #2c5f7a;
+  --evidence-derived: #4a7d92;
+  --evidence-assumption: #8a7d5a;
+  --evidence-synthetic: #8a5f7a;
+  --evidence-model: #5f6f8a;
+  --evidence-insufficient: #8a8f93;
+
+  /* ---- facility categories --------------------------------------------
+     Marker colours for the four facility categories. Deliberately quieter
+     than the status ramp — a facility's category is identity, not severity —
+     and each is always paired with its category name in text. */
+  --cat-health: #9a4f47;
+  --cat-emergency: #3f6484;
+  --cat-education: #6e6532;
+  --cat-other: #667077;
+
+  /* ---- draped layers ---------------------------------------------------
+     Roads and drainage on the terrain: thin, cool, low-contrast until
+     something happens to them. Bridges darker — they are the access
+     bottlenecks the simulation turns on. */
+  --road-minor: #8b959b;
+  --road-major: #66717a;
+  --road-bridge: #454f57;
+  --water-line: #7f98a6;
+  --water-body: #93a7b3;
+  --building-mass: #b9b3a6;
+  --community-mark: #4a555e;
+
+  /* ---- block ----------------------------------------------------------
+     The 3D object. Field is the neutral ground the specimen sits in; top and
+     wall are the naturalistic land and the sedimentary cut; rim is the single
+     decorative element permitted in the application.
+     Flood is chosen against everything else on the block: the sea and rivers
+     render as desaturated grey-blue, terrain owns green and ochre, and teal
+     is reserved for the network — which leaves the indigo band as the only
+     hue no natural feature occupies. It is a flat semi-transparent fill with
+     a hard edge, never a gradient and never animated. */
+  --block-field: #f4f6f7;
+  --block-rim: #9aa3a9;
+  --block-top: #6f8a5e;
+  --block-wall: #c6bcab;
+  --block-flood: #5d5fb0;
+  --observed-water: #33415c; /* Sentinel-1 observed extent: boundary only */
+  --block-flood-edge: #43458f;
+  --block-flood-opacity: 0.55;
+
+  /* ---- type -----------------------------------------------------------
+     System stack only — the demo runs with no font server. Sans for prose,
+     mono for every figure. At most three of these sizes may appear in any
+     one region. */
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+
+  --text-micro: 10px;
+  --text-small: 11px;
+  --text-body: 13px;
+  --text-lead: 15px;
+  --text-figure: 26px;
+
+  --tracking-label: 0.08em;
+  --leading-tight: 1.2;
+  --leading-body: 1.45;
+
+  /* ---- radius ---------------------------------------------------------
+     Two radii in the entire application. There is no third. */
+  --radius-sm: 3px;
+  --radius-md: 6px;
+
+  /* ---- motion ---------------------------------------------------------
+     Opacity and transform only. The one deliberate camera move (double-click
+     recentre, 500ms) lives in the renderer and is the sole exception. */
+  --motion-fast: 140ms;
+  --motion-base: 240ms;
+  --motion-slow: 420ms;
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+
+  /* ---- metrics --------------------------------------------------------- */
+  --rail-top-height: 44px;
+  --rail-timeline-height: 76px;
+  --readout-width: 340px;
+  --layer-cluster-width: 220px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --border-width: 1px;
+  --focus-ring-width: 2px;
+}
+
+/* Reduced motion: every duration to zero. Honours the OS setting as well as
+   the explicit toggle, and the toggle can only ever reduce motion further. */
+:root[data-motion="reduced"] {
+  --motion-fast: 0ms;
+  --motion-base: 0ms;
+  --motion-slow: 0ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion-fast: 0ms;
+    --motion-base: 0ms;
+    --motion-slow: 0ms;
+  }
+}

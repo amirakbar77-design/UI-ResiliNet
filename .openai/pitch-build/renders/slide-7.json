@@ -1,0 +1,702 @@
+{
+  "schema": "openai.presentation.layout/v4",
+  "unit": "px",
+  "slide": {
+    "aid": "sl/og7mjn",
+    "id": "og7mjn",
+    "slide": 7,
+    "layoutId": "413c5c0f-aadc-4681-92f1-622bbaee9e3e",
+    "layoutName": "Title Slide",
+    "layoutType": "title",
+    "masterLayoutId": "7a892ff9-f1c7-43d4-b10d-83e76a384619",
+    "masterLayoutName": "Master",
+    "backgroundColor": "#FAFAF7",
+    "frame": {
+      "left": 0,
+      "top": 0,
+      "width": 1600,
+      "height": 900
+    }
+  },
+  "theme": {
+    "colorSchemeName": "ChatGPT",
+    "colors": {
+      "accent1": "#156082",
+      "accent2": "#E97132",
+      "accent3": "#196B24",
+      "accent4": "#0F9ED5",
+      "accent5": "#A02B93",
+      "accent6": "#4EA72E",
+      "bg1": "#FFFFFF",
+      "bg2": "#000000",
+      "tx1": "#1F1F1F",
+      "tx2": "#FFFFFF",
+      "dk1": "#000000",
+      "lt1": "#FFFFFF",
+      "dk2": "#0E2841",
+      "lt2": "#E8E8E8",
+      "hlink": "#467886",
+      "folHlink": "#96607D"
+    },
+    "typefaces": [
+      "Helvetica Neue"
+    ]
+  },
+  "inheritedLayers": [
+    {
+      "scope": "layout",
+      "id": "413c5c0f-aadc-4681-92f1-622bbaee9e3e",
+      "name": "Title Slide",
+      "type": "title",
+      "parentLayoutId": "7a892ff9-f1c7-43d4-b10d-83e76a384619",
+      "elements": []
+    },
+    {
+      "scope": "master",
+      "id": "7a892ff9-f1c7-43d4-b10d-83e76a384619",
+      "name": "Master",
+      "type": "master",
+      "elements": []
+    }
+  ],
+  "elements": [
+    {
+      "order": 1,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/8bex4bix",
+      "id": "1",
+      "name": "Public data. Transparent assumptions.",
+      "bbox": [
+        80,
+        62,
+        1440,
+        150
+      ],
+      "geometry": "rect",
+      "text": "Public data. Transparent assumptions.",
+      "textPreview": "Public data. Transparent assumptions.",
+      "resolvedFontSize": 58.71,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 58.71,
+        "typeface": "Helvetica Neue",
+        "color": "#111827",
+        "bold": true,
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "square",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "Public data. Transparent assumptions."
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "Public data. Transparent assumptions.",
+          "resolvedTextStyle": {
+            "fontSize": 58.71,
+            "typeface": "Helvetica Neue",
+            "color": "#111827",
+            "bold": true,
+            "alignment": "left"
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "Public data. Transparent assumptions.",
+              "fontSize": 58.71,
+              "typeface": "Helvetica Neue",
+              "color": "#111827",
+              "bold": true,
+              "alignment": "left"
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 2,
+      "kind": "image",
+      "scope": "slide",
+      "aid": "im/q5cjyh4b",
+      "id": "2",
+      "bbox": [
+        80,
+        220,
+        850,
+        560
+      ],
+      "geometry": "roundRect",
+      "alt": "Scenario rain on the actual valley map",
+      "contentType": "image/jpeg",
+      "imageCrop": {
+        "left": 0.02,
+        "top": 0,
+        "right": 0.04,
+        "bottom": 0.34
+      },
+      "imageFit": "cover",
+      "imageMask": {
+        "geometry": "roundRect",
+        "adjustmentList": [
+          {
+            "name": "adj",
+            "formula": "val 2857"
+          }
+        ]
+      },
+      "asset": {
+        "assetId": "0b7052a5-1abf-44b1-b111-d10f9ea39bdd",
+        "contentType": "image/jpeg",
+        "byteLength": 73779
+      }
+    },
+    {
+      "order": 3,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/m9wf210r",
+      "id": "3",
+      "bbox": [
+        80,
+        630,
+        850,
+        150
+      ],
+      "geometry": "rect",
+      "fillColor": "#FAFAF7",
+      "lineWidth": 0
+    },
+    {
+      "order": 4,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/lony9wj6",
+      "id": "4",
+      "name": "Prepared rainfall scenario",
+      "bbox": [
+        80,
+        692,
+        850,
+        62
+      ],
+      "geometry": "rect",
+      "text": "Prepared rainfall scenario",
+      "textPreview": "Prepared rainfall scenario",
+      "resolvedFontSize": 32,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 32,
+        "typeface": "Helvetica Neue",
+        "color": "#6B7280",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "square",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "Prepared rainfall scenario"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "Prepared rainfall scenario",
+          "resolvedTextStyle": {
+            "fontSize": 32,
+            "typeface": "Helvetica Neue",
+            "color": "#6B7280",
+            "alignment": "left"
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "Prepared rainfall scenario",
+              "fontSize": 32,
+              "typeface": "Helvetica Neue",
+              "color": "#6B7280",
+              "alignment": "left"
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 5,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/knux0bil",
+      "id": "5",
+      "name": "Terrain and roads\nPopulation and towers\nAI we",
+      "bbox": [
+        985,
+        232,
+        535,
+        190
+      ],
+      "geometry": "rect",
+      "text": "Terrain and roads\nPopulation and towers\nAI weather forecasts",
+      "textPreview": "Terrain and roads | Population and towers | AI weather forecasts",
+      "resolvedFontSize": 38,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 38,
+        "typeface": "Helvetica Neue",
+        "color": "#111827",
+        "bold": true,
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "square",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 3,
+        "lines": [
+          {
+            "index": 1,
+            "text": "Terrain and roads"
+          },
+          {
+            "index": 2,
+            "text": "Population and towers"
+          },
+          {
+            "index": 3,
+            "text": "AI weather forecasts"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "Terrain and roads",
+          "resolvedTextStyle": {
+            "fontSize": 38,
+            "typeface": "Helvetica Neue",
+            "color": "#111827",
+            "bold": true,
+            "alignment": "left"
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "Terrain and roads",
+              "fontSize": 38,
+              "typeface": "Helvetica Neue",
+              "color": "#111827",
+              "bold": true,
+              "alignment": "left"
+            }
+          ],
+          "marginLeft": 0
+        },
+        {
+          "index": 2,
+          "text": "Population and towers",
+          "resolvedTextStyle": {
+            "fontSize": 38,
+            "typeface": "Helvetica Neue",
+            "color": "#111827",
+            "bold": true,
+            "alignment": "left"
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "Population and towers",
+              "fontSize": 38,
+              "typeface": "Helvetica Neue",
+              "color": "#111827",
+              "bold": true,
+              "alignment": "left"
+            }
+          ],
+          "marginLeft": 0
+        },
+        {
+          "index": 3,
+          "text": "AI weather forecasts",
+          "resolvedTextStyle": {
+            "fontSize": 38,
+            "typeface": "Helvetica Neue",
+            "color": "#111827",
+            "bold": true,
+            "alignment": "left"
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "AI weather forecasts",
+              "fontSize": 38,
+              "typeface": "Helvetica Neue",
+              "color": "#111827",
+              "bold": true,
+              "alignment": "left"
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 6,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/zmlg7610",
+      "id": "6",
+      "name": "The demo uses\na synthetic storm",
+      "bbox": [
+        985,
+        485,
+        535,
+        102
+      ],
+      "geometry": "rect",
+      "text": "The demo uses\na synthetic storm",
+      "textPreview": "The demo uses | a synthetic storm",
+      "resolvedFontSize": 36,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 36,
+        "typeface": "Helvetica Neue",
+        "color": "#1D4ED8",
+        "bold": true,
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "square",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 2,
+        "lines": [
+          {
+            "index": 1,
+            "text": "The demo uses"
+          },
+          {
+            "index": 2,
+            "text": "a synthetic storm"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "The demo uses",
+          "resolvedTextStyle": {
+            "fontSize": 36,
+            "typeface": "Helvetica Neue",
+            "color": "#1D4ED8",
+            "bold": true,
+            "alignment": "left"
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "The demo uses",
+              "fontSize": 36,
+              "typeface": "Helvetica Neue",
+              "color": "#1D4ED8",
+              "bold": true,
+              "alignment": "left"
+            }
+          ],
+          "marginLeft": 0
+        },
+        {
+          "index": 2,
+          "text": "a synthetic storm",
+          "resolvedTextStyle": {
+            "fontSize": 36,
+            "typeface": "Helvetica Neue",
+            "color": "#1D4ED8",
+            "bold": true,
+            "alignment": "left"
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "a synthetic storm",
+              "fontSize": 36,
+              "typeface": "Helvetica Neue",
+              "color": "#1D4ED8",
+              "bold": true,
+              "alignment": "left"
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 7,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/ylcfy10f",
+      "id": "7",
+      "name": "2014: road cuts matched;\none village outage m",
+      "bbox": [
+        985,
+        661,
+        535,
+        91
+      ],
+      "geometry": "rect",
+      "text": "2014: road cuts matched;\none village outage missed",
+      "textPreview": "2014: road cuts matched; | one village outage missed",
+      "resolvedFontSize": 32,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 32,
+        "typeface": "Helvetica Neue",
+        "color": "#6B7280",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "square",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 2,
+        "lines": [
+          {
+            "index": 1,
+            "text": "2014: road cuts matched;"
+          },
+          {
+            "index": 2,
+            "text": "one village outage missed"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "2014: road cuts matched;",
+          "resolvedTextStyle": {
+            "fontSize": 32,
+            "typeface": "Helvetica Neue",
+            "color": "#6B7280",
+            "alignment": "left"
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "2014: road cuts matched;",
+              "fontSize": 32,
+              "typeface": "Helvetica Neue",
+              "color": "#6B7280",
+              "alignment": "left"
+            }
+          ],
+          "marginLeft": 0
+        },
+        {
+          "index": 2,
+          "text": "one village outage missed",
+          "resolvedTextStyle": {
+            "fontSize": 32,
+            "typeface": "Helvetica Neue",
+            "color": "#6B7280",
+            "alignment": "left"
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "one village outage missed",
+              "fontSize": 32,
+              "typeface": "Helvetica Neue",
+              "color": "#6B7280",
+              "alignment": "left"
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 8,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/547yl0za",
+      "id": "8",
+      "name": "NASA, OSM, WorldPop, OpenCellID, Google DeepM",
+      "bbox": [
+        80,
+        845,
+        1360,
+        29
+      ],
+      "geometry": "rect",
+      "text": "NASA, OSM, WorldPop, OpenCellID, Google DeepMind WeatherNext 3, ECMWF ERA5-Land.",
+      "textPreview": "NASA, OSM, WorldPop, OpenCellID, Google DeepMind WeatherNext 3, ECMWF ERA5-Land.",
+      "resolvedFontSize": 18.69,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 18.69,
+        "typeface": "Helvetica Neue",
+        "color": "#6B7280",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "square",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "NASA, OSM, WorldPop, OpenCellID, Google DeepMind WeatherNext 3, ECMWF ERA5-Land."
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "NASA, OSM, WorldPop, OpenCellID, Google DeepMind WeatherNext 3, ECMWF ERA5-Land.",
+          "resolvedTextStyle": {
+            "fontSize": 18.69,
+            "typeface": "Helvetica Neue",
+            "color": "#6B7280",
+            "alignment": "left"
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "NASA, OSM, WorldPop, OpenCellID, Google DeepMind WeatherNext 3, ECMWF ERA5-Land.",
+              "fontSize": 18.69,
+              "typeface": "Helvetica Neue",
+              "color": "#6B7280",
+              "alignment": "left"
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 9,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/4jyhcvip",
+      "id": "9",
+      "name": "07",
+      "bbox": [
+        1460,
+        845,
+        60,
+        30
+      ],
+      "geometry": "rect",
+      "text": "07",
+      "textPreview": "07",
+      "resolvedFontSize": 18.69,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 18.69,
+        "typeface": "Helvetica Neue",
+        "color": "#6B7280",
+        "alignment": "right",
+        "verticalAlignment": "top",
+        "wrap": "square",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "07"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "07",
+          "resolvedTextStyle": {
+            "fontSize": 18.69,
+            "typeface": "Helvetica Neue",
+            "color": "#6B7280",
+            "alignment": "right"
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "07",
+              "fontSize": 18.69,
+              "typeface": "Helvetica Neue",
+              "color": "#6B7280",
+              "alignment": "right"
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    }
+  ],
+  "composeRuns": []
+}

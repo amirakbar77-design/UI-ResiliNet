@@ -1,0 +1,115 @@
+[
+  {
+    "slide": 1,
+    "title": "Full battery. No service.",
+    "text": [
+      "Full battery.",
+      "No service.",
+      "The tower is standing. On dry ground.",
+      "ResiliNet",
+      "Helps response teams place portable towers before roads close"
+    ]
+  },
+  {
+    "slide": 2,
+    "title": "Malaysia’s floods, December 2014",
+    "text": [
+      "Malaysia’s floods, December 2014",
+      "237,000",
+      "people displaced nationwide",
+      "In Kelantan, families pleaded for help when they found signal.",
+      "Malaysiakini, 30 Dec 2014. Kelantan reporting: The Malaysian Insider, 26 Dec 2014.",
+      "02"
+    ]
+  },
+  {
+    "slide": 3,
+    "title": "Dry ground can still lose signal",
+    "text": [
+      "Dry ground can still lose signal",
+      "SIMULATED STORM · 14 HOURS AHEAD",
+      "19,595",
+      "people on dry ground, without signal",
+      "Flooded roads isolate towers. Backup power runs out. Signal disappears.",
+      "Illustrative scenario at +14 h. ResiliNet coverage model and WorldPop 2020.",
+      "03"
+    ]
+  },
+  {
+    "slide": 4,
+    "title": "Where should the portable tower go?",
+    "text": [
+      "Where should the portable tower go?",
+      "36,614",
+      "people projected to lack signal at hour 14",
+      "Includes the 19,595 on dry ground. Where should one portable tower go?",
+      "Illustrative scenario. Kelantan gauge 27.0 m. Before any response.",
+      "04"
+    ]
+  },
+  {
+    "slide": 5,
+    "title": "The right hill, before the road closes",
+    "text": [
+      "The right hill, before the road closes",
+      "Every location must pass",
+      "Reachable in time",
+      "Reaches people",
+      "Links to a\nworking tower",
+      "ResiliNet prototype. NASA SRTM, OpenStreetMap, WorldPop and OpenCellID.",
+      "05"
+    ]
+  },
+  {
+    "slide": 6,
+    "title": "One plan: a portable tower + generator support",
+    "text": [
+      "One plan: a portable tower + generator support",
+      "8,604",
+      "additional people keep\na connection",
+      "of 13,811 still at risk\nafter routine support",
+      "1,128 via the portable tower\n7,476 via generator support",
+      "Model estimate. Including routine support: 31,407 benefit; 5,207 remain without coverage.",
+      "06"
+    ]
+  },
+  {
+    "slide": 7,
+    "title": "Public data. Transparent assumptions.",
+    "text": [
+      "Public data. Transparent assumptions.",
+      "Prepared rainfall scenario",
+      "Terrain and roads\nPopulation and towers\nAI weather forecasts",
+      "The demo uses\na synthetic storm",
+      "2014: road cuts matched;\none village outage missed",
+      "NASA, OSM, WorldPop, OpenCellID, Google DeepMind WeatherNext 3, ECMWF ERA5-Land.",
+      "07"
+    ]
+  },
+  {
+    "slide": 8,
+    "title": "Two valleys. The same planning engine.",
+    "text": [
+      "Two valleys. The same planning engine.",
+      "Galas, Kelantan",
+      "Padas, Sabah",
+      "Prepare the data once. Plan offline when connectivity fails.",
+      "ResiliNet prototype. Two prepared datasets. Operational use requires local validation.",
+      "08"
+    ]
+  },
+  {
+    "slide": 9,
+    "title": "When a tower fails, the plan changes",
+    "text": [
+      "When a tower fails, the plan changes",
+      "1",
+      "new report",
+      "A new recommendation",
+      "Watch the two-minute live demo",
+      "Seeking an operator pilot: verified sites, outage logs, field checks.",
+      "Interactive prototype. Replanning time depends on the device and scenario.",
+      "09"
+    ]
+  }
+]

@@ -1,10 +1,12 @@
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
 import './globals.css';
 
+export const viewport: Viewport = { width: 'device-width', initialScale: 1 };
+
 export const metadata: Metadata = {
-  title: 'ResiliNet 3D — UI Concept',
+  title: 'ResiliNet — Keep communities connected',
   description:
-    'A static interface concept for disaster-resilient connectivity planning.',
+    'An interactive flood-response demo. See the impact, choose a safe tower location, and reconnect communities.',
 };
 
 export default function RootLayout({

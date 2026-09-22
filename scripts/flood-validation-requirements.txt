@@ -1,0 +1,4 @@
+numpy>=2,<3
+rasterio>=1.4,<2
+pyproj>=3.6,<4
+matplotlib>=3.9,<4

@@ -1,0 +1,651 @@
+{
+  "schema": "openai.presentation.layout/v4",
+  "unit": "px",
+  "slide": {
+    "aid": "sl/5cpczz",
+    "id": "5cpczz",
+    "slide": 6,
+    "layoutId": "413c5c0f-aadc-4681-92f1-622bbaee9e3e",
+    "layoutName": "Title Slide",
+    "layoutType": "title",
+    "masterLayoutId": "7a892ff9-f1c7-43d4-b10d-83e76a384619",
+    "masterLayoutName": "Master",
+    "backgroundColor": "#FAFAF7",
+    "frame": {
+      "left": 0,
+      "top": 0,
+      "width": 1600,
+      "height": 900
+    }
+  },
+  "theme": {
+    "colorSchemeName": "ChatGPT",
+    "colors": {
+      "accent1": "#156082",
+      "accent2": "#E97132",
+      "accent3": "#196B24",
+      "accent4": "#0F9ED5",
+      "accent5": "#A02B93",
+      "accent6": "#4EA72E",
+      "bg1": "#FFFFFF",
+      "bg2": "#000000",
+      "tx1": "#1F1F1F",
+      "tx2": "#FFFFFF",
+      "dk1": "#000000",
+      "lt1": "#FFFFFF",
+      "dk2": "#0E2841",
+      "lt2": "#E8E8E8",
+      "hlink": "#467886",
+      "folHlink": "#96607D"
+    },
+    "typefaces": [
+      "Helvetica Neue"
+    ]
+  },
+  "inheritedLayers": [
+    {
+      "scope": "layout",
+      "id": "413c5c0f-aadc-4681-92f1-622bbaee9e3e",
+      "name": "Title Slide",
+      "type": "title",
+      "parentLayoutId": "7a892ff9-f1c7-43d4-b10d-83e76a384619",
+      "elements": []
+    },
+    {
+      "scope": "master",
+      "id": "7a892ff9-f1c7-43d4-b10d-83e76a384619",
+      "name": "Master",
+      "type": "master",
+      "elements": []
+    }
+  ],
+  "elements": [
+    {
+      "order": 1,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/5cbq1gne",
+      "id": "1",
+      "name": "One plan: a portable tower + generator suppor",
+      "bbox": [
+        80,
+        62,
+        1440,
+        150
+      ],
+      "geometry": "rect",
+      "text": "One plan: a portable tower + generator support",
+      "textPreview": "One plan: a portable tower + generator support",
+      "resolvedFontSize": 58.71,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 58.71,
+        "typeface": "Helvetica Neue",
+        "color": "#111827",
+        "bold": true,
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "square",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "One plan: a portable tower + generator support"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "One plan: a portable tower + generator support",
+          "resolvedTextStyle": {
+            "fontSize": 58.71,
+            "typeface": "Helvetica Neue",
+            "color": "#111827",
+            "bold": true,
+            "alignment": "left"
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "One plan: a portable tower + generator support",
+              "fontSize": 58.71,
+              "typeface": "Helvetica Neue",
+              "color": "#111827",
+              "bold": true,
+              "alignment": "left"
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 2,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/y907qlo3",
+      "id": "2",
+      "name": "8,604",
+      "bbox": [
+        70,
+        247,
+        805,
+        295
+      ],
+      "geometry": "rect",
+      "text": "8,604",
+      "textPreview": "8,604",
+      "resolvedFontSize": 250,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 250,
+        "typeface": "Helvetica Neue",
+        "color": "#1D4ED8",
+        "bold": true,
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "square",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "8,604"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "8,604",
+          "resolvedTextStyle": {
+            "fontSize": 3.33,
+            "typeface": "Helvetica Neue",
+            "color": "#1D4ED8",
+            "bold": true,
+            "alignment": "left"
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "8,604",
+              "fontSize": 3.33,
+              "typeface": "Helvetica Neue",
+              "color": "#1D4ED8",
+              "bold": true,
+              "alignment": "left"
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 3,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/ja98zq5o",
+      "id": "3",
+      "name": "additional people keep\na connection",
+      "bbox": [
+        87,
+        539,
+        680,
+        110
+      ],
+      "geometry": "rect",
+      "text": "additional people keep\na connection",
+      "textPreview": "additional people keep | a connection",
+      "resolvedFontSize": 39,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 39,
+        "typeface": "Helvetica Neue",
+        "color": "#111827",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "square",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 2,
+        "lines": [
+          {
+            "index": 1,
+            "text": "additional people keep"
+          },
+          {
+            "index": 2,
+            "text": "a connection"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "additional people keep",
+          "resolvedTextStyle": {
+            "fontSize": 39,
+            "typeface": "Helvetica Neue",
+            "color": "#111827",
+            "alignment": "left"
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "additional people keep",
+              "fontSize": 39,
+              "typeface": "Helvetica Neue",
+              "color": "#111827",
+              "alignment": "left"
+            }
+          ],
+          "marginLeft": 0
+        },
+        {
+          "index": 2,
+          "text": "a connection",
+          "resolvedTextStyle": {
+            "fontSize": 39,
+            "typeface": "Helvetica Neue",
+            "color": "#111827",
+            "alignment": "left"
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "a connection",
+              "fontSize": 39,
+              "typeface": "Helvetica Neue",
+              "color": "#111827",
+              "alignment": "left"
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 4,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/sz29wvm5",
+      "id": "4",
+      "name": "of 13,811 still at risk\nafter routine support",
+      "bbox": [
+        87,
+        684,
+        685,
+        90
+      ],
+      "geometry": "rect",
+      "text": "of 13,811 still at risk\nafter routine support",
+      "textPreview": "of 13,811 still at risk | after routine support",
+      "resolvedFontSize": 32,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 32,
+        "typeface": "Helvetica Neue",
+        "color": "#6B7280",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "square",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 2,
+        "lines": [
+          {
+            "index": 1,
+            "text": "of 13,811 still at risk"
+          },
+          {
+            "index": 2,
+            "text": "after routine support"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "of 13,811 still at risk",
+          "resolvedTextStyle": {
+            "fontSize": 32,
+            "typeface": "Helvetica Neue",
+            "color": "#6B7280",
+            "alignment": "left"
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "of 13,811 still at risk",
+              "fontSize": 32,
+              "typeface": "Helvetica Neue",
+              "color": "#6B7280",
+              "alignment": "left"
+            }
+          ],
+          "marginLeft": 0
+        },
+        {
+          "index": 2,
+          "text": "after routine support",
+          "resolvedTextStyle": {
+            "fontSize": 32,
+            "typeface": "Helvetica Neue",
+            "color": "#6B7280",
+            "alignment": "left"
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "after routine support",
+              "fontSize": 32,
+              "typeface": "Helvetica Neue",
+              "color": "#6B7280",
+              "alignment": "left"
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 5,
+      "kind": "image",
+      "scope": "slide",
+      "aid": "im/4b2lcf65",
+      "id": "5",
+      "bbox": [
+        830,
+        223,
+        690,
+        480
+      ],
+      "geometry": "roundRect",
+      "alt": "Recommended portable tower at Kampung Bukit Bedak and its coverage",
+      "contentType": "image/jpeg",
+      "imageFit": "cover",
+      "imageMask": {
+        "geometry": "roundRect",
+        "adjustmentList": [
+          {
+            "name": "adj",
+            "formula": "val 3333"
+          }
+        ]
+      },
+      "asset": {
+        "assetId": "a70b1b67-2584-40a9-bc4b-193dfeae7dae",
+        "contentType": "image/jpeg",
+        "byteLength": 62219
+      }
+    },
+    {
+      "order": 6,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/6dkrul4z",
+      "id": "6",
+      "name": "1,128 via the portable tower\n7,476 via genera",
+      "bbox": [
+        830,
+        724,
+        690,
+        90
+      ],
+      "geometry": "rect",
+      "text": "1,128 via the portable tower\n7,476 via generator support",
+      "textPreview": "1,128 via the portable tower | 7,476 via generator support",
+      "resolvedFontSize": 30,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 30,
+        "typeface": "Helvetica Neue",
+        "color": "#111827",
+        "bold": true,
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "square",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 2,
+        "lines": [
+          {
+            "index": 1,
+            "text": "1,128 via the portable tower"
+          },
+          {
+            "index": 2,
+            "text": "7,476 via generator support"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "1,128 via the portable tower",
+          "resolvedTextStyle": {
+            "fontSize": 30,
+            "typeface": "Helvetica Neue",
+            "color": "#111827",
+            "bold": true,
+            "alignment": "left"
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "1,128 via the portable tower",
+              "fontSize": 30,
+              "typeface": "Helvetica Neue",
+              "color": "#111827",
+              "bold": true,
+              "alignment": "left"
+            }
+          ],
+          "marginLeft": 0
+        },
+        {
+          "index": 2,
+          "text": "7,476 via generator support",
+          "resolvedTextStyle": {
+            "fontSize": 30,
+            "typeface": "Helvetica Neue",
+            "color": "#111827",
+            "bold": true,
+            "alignment": "left"
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "7,476 via generator support",
+              "fontSize": 30,
+              "typeface": "Helvetica Neue",
+              "color": "#111827",
+              "bold": true,
+              "alignment": "left"
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 7,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/7et83q5k",
+      "id": "7",
+      "name": "Model estimate. Including routine support: 31",
+      "bbox": [
+        80,
+        845,
+        1360,
+        29
+      ],
+      "geometry": "rect",
+      "text": "Model estimate. Including routine support: 31,407 benefit; 5,207 remain without coverage.",
+      "textPreview": "Model estimate. Including routine support: 31,407 benefit; 5,207 remain without coverage.",
+      "resolvedFontSize": 18.69,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 18.69,
+        "typeface": "Helvetica Neue",
+        "color": "#6B7280",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "square",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "Model estimate. Including routine support: 31,407 benefit; 5,207 remain without coverage."
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "Model estimate. Including routine support: 31,407 benefit; 5,207 remain without coverage.",
+          "resolvedTextStyle": {
+            "fontSize": 18.69,
+            "typeface": "Helvetica Neue",
+            "color": "#6B7280",
+            "alignment": "left"
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "Model estimate. Including routine support: 31,407 benefit; 5,207 remain without coverage.",
+              "fontSize": 18.69,
+              "typeface": "Helvetica Neue",
+              "color": "#6B7280",
+              "alignment": "left"
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 8,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/g3m90fm1",
+      "id": "8",
+      "name": "06",
+      "bbox": [
+        1460,
+        845,
+        60,
+        30
+      ],
+      "geometry": "rect",
+      "text": "06",
+      "textPreview": "06",
+      "resolvedFontSize": 18.69,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 18.69,
+        "typeface": "Helvetica Neue",
+        "color": "#6B7280",
+        "alignment": "right",
+        "verticalAlignment": "top",
+        "wrap": "square",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "06"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "06",
+          "resolvedTextStyle": {
+            "fontSize": 18.69,
+            "typeface": "Helvetica Neue",
+            "color": "#6B7280",
+            "alignment": "right"
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "06",
+              "fontSize": 18.69,
+              "typeface": "Helvetica Neue",
+              "color": "#6B7280",
+              "alignment": "right"
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    }
+  ],
+  "composeRuns": []
+}

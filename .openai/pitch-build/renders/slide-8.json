@@ -1,0 +1,538 @@
+{
+  "schema": "openai.presentation.layout/v4",
+  "unit": "px",
+  "slide": {
+    "aid": "sl/lpur3q",
+    "id": "lpur3q",
+    "slide": 8,
+    "layoutId": "413c5c0f-aadc-4681-92f1-622bbaee9e3e",
+    "layoutName": "Title Slide",
+    "layoutType": "title",
+    "masterLayoutId": "7a892ff9-f1c7-43d4-b10d-83e76a384619",
+    "masterLayoutName": "Master",
+    "backgroundColor": "#FAFAF7",
+    "frame": {
+      "left": 0,
+      "top": 0,
+      "width": 1600,
+      "height": 900
+    }
+  },
+  "theme": {
+    "colorSchemeName": "ChatGPT",
+    "colors": {
+      "accent1": "#156082",
+      "accent2": "#E97132",
+      "accent3": "#196B24",
+      "accent4": "#0F9ED5",
+      "accent5": "#A02B93",
+      "accent6": "#4EA72E",
+      "bg1": "#FFFFFF",
+      "bg2": "#000000",
+      "tx1": "#1F1F1F",
+      "tx2": "#FFFFFF",
+      "dk1": "#000000",
+      "lt1": "#FFFFFF",
+      "dk2": "#0E2841",
+      "lt2": "#E8E8E8",
+      "hlink": "#467886",
+      "folHlink": "#96607D"
+    },
+    "typefaces": [
+      "Helvetica Neue"
+    ]
+  },
+  "inheritedLayers": [
+    {
+      "scope": "layout",
+      "id": "413c5c0f-aadc-4681-92f1-622bbaee9e3e",
+      "name": "Title Slide",
+      "type": "title",
+      "parentLayoutId": "7a892ff9-f1c7-43d4-b10d-83e76a384619",
+      "elements": []
+    },
+    {
+      "scope": "master",
+      "id": "7a892ff9-f1c7-43d4-b10d-83e76a384619",
+      "name": "Master",
+      "type": "master",
+      "elements": []
+    }
+  ],
+  "elements": [
+    {
+      "order": 1,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/3m1knut0",
+      "id": "1",
+      "name": "Two valleys. The same planning engine.",
+      "bbox": [
+        80,
+        62,
+        1440,
+        150
+      ],
+      "geometry": "rect",
+      "text": "Two valleys. The same planning engine.",
+      "textPreview": "Two valleys. The same planning engine.",
+      "resolvedFontSize": 58.71,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 58.71,
+        "typeface": "Helvetica Neue",
+        "color": "#111827",
+        "bold": true,
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "square",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "Two valleys. The same planning engine."
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "Two valleys. The same planning engine.",
+          "resolvedTextStyle": {
+            "fontSize": 58.71,
+            "typeface": "Helvetica Neue",
+            "color": "#111827",
+            "bold": true,
+            "alignment": "left"
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "Two valleys. The same planning engine.",
+              "fontSize": 58.71,
+              "typeface": "Helvetica Neue",
+              "color": "#111827",
+              "bold": true,
+              "alignment": "left"
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 2,
+      "kind": "image",
+      "scope": "slide",
+      "aid": "im/h8v6xgvm",
+      "id": "2",
+      "bbox": [
+        80,
+        226,
+        700,
+        465
+      ],
+      "geometry": "roundRect",
+      "alt": "Sungai Galas terrain and coverage in the Kelantan deployment",
+      "contentType": "image/jpeg",
+      "imageFit": "cover",
+      "imageMask": {
+        "geometry": "roundRect",
+        "adjustmentList": [
+          {
+            "name": "adj",
+            "formula": "val 3441"
+          }
+        ]
+      },
+      "asset": {
+        "assetId": "f59e6528-2708-4361-bf58-7b32e51e226b",
+        "contentType": "image/jpeg",
+        "byteLength": 80318
+      }
+    },
+    {
+      "order": 3,
+      "kind": "image",
+      "scope": "slide",
+      "aid": "im/g7m54be1",
+      "id": "3",
+      "bbox": [
+        820,
+        226,
+        700,
+        465
+      ],
+      "geometry": "roundRect",
+      "alt": "Sungai Padas terrain and coverage in the Sabah deployment",
+      "contentType": "image/jpeg",
+      "imageFit": "cover",
+      "imageMask": {
+        "geometry": "roundRect",
+        "adjustmentList": [
+          {
+            "name": "adj",
+            "formula": "val 3441"
+          }
+        ]
+      },
+      "asset": {
+        "assetId": "37d5f3c6-da4d-4acd-94b7-2cc25c29e3eb",
+        "contentType": "image/jpeg",
+        "byteLength": 89684
+      }
+    },
+    {
+      "order": 4,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/uhsjqpc3",
+      "id": "4",
+      "name": "Galas, Kelantan",
+      "bbox": [
+        80,
+        710,
+        700,
+        56
+      ],
+      "geometry": "rect",
+      "text": "Galas, Kelantan",
+      "textPreview": "Galas, Kelantan",
+      "resolvedFontSize": 35,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 35,
+        "typeface": "Helvetica Neue",
+        "color": "#111827",
+        "bold": true,
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "square",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "Galas, Kelantan"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "Galas, Kelantan",
+          "resolvedTextStyle": {
+            "fontSize": 35,
+            "typeface": "Helvetica Neue",
+            "color": "#111827",
+            "bold": true,
+            "alignment": "left"
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "Galas, Kelantan",
+              "fontSize": 35,
+              "typeface": "Helvetica Neue",
+              "color": "#111827",
+              "bold": true,
+              "alignment": "left"
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 5,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/fi1kzuto",
+      "id": "5",
+      "name": "Padas, Sabah",
+      "bbox": [
+        820,
+        710,
+        700,
+        56
+      ],
+      "geometry": "rect",
+      "text": "Padas, Sabah",
+      "textPreview": "Padas, Sabah",
+      "resolvedFontSize": 35,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 35,
+        "typeface": "Helvetica Neue",
+        "color": "#111827",
+        "bold": true,
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "square",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "Padas, Sabah"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "Padas, Sabah",
+          "resolvedTextStyle": {
+            "fontSize": 35,
+            "typeface": "Helvetica Neue",
+            "color": "#111827",
+            "bold": true,
+            "alignment": "left"
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "Padas, Sabah",
+              "fontSize": 35,
+              "typeface": "Helvetica Neue",
+              "color": "#111827",
+              "bold": true,
+              "alignment": "left"
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 6,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/gja1szu9",
+      "id": "6",
+      "name": "Prepare the data once. Plan offline when conn",
+      "bbox": [
+        80,
+        782,
+        1400,
+        47
+      ],
+      "geometry": "rect",
+      "text": "Prepare the data once. Plan offline when connectivity fails.",
+      "textPreview": "Prepare the data once. Plan offline when connectivity fails.",
+      "resolvedFontSize": 32,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 32,
+        "typeface": "Helvetica Neue",
+        "color": "#1D4ED8",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "square",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "Prepare the data once. Plan offline when connectivity fails."
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "Prepare the data once. Plan offline when connectivity fails.",
+          "resolvedTextStyle": {
+            "fontSize": 32,
+            "typeface": "Helvetica Neue",
+            "color": "#1D4ED8",
+            "alignment": "left"
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "Prepare the data once. Plan offline when connectivity fails.",
+              "fontSize": 32,
+              "typeface": "Helvetica Neue",
+              "color": "#1D4ED8",
+              "alignment": "left"
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 7,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/hkj21kbu",
+      "id": "7",
+      "name": "ResiliNet prototype. Two prepared datasets. O",
+      "bbox": [
+        80,
+        845,
+        1360,
+        29
+      ],
+      "geometry": "rect",
+      "text": "ResiliNet prototype. Two prepared datasets. Operational use requires local validation.",
+      "textPreview": "ResiliNet prototype. Two prepared datasets. Operational use requires local validation.",
+      "resolvedFontSize": 18.69,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 18.69,
+        "typeface": "Helvetica Neue",
+        "color": "#6B7280",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "square",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "ResiliNet prototype. Two prepared datasets. Operational use requires local validation."
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "ResiliNet prototype. Two prepared datasets. Operational use requires local validation.",
+          "resolvedTextStyle": {
+            "fontSize": 18.69,
+            "typeface": "Helvetica Neue",
+            "color": "#6B7280",
+            "alignment": "left"
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "ResiliNet prototype. Two prepared datasets. Operational use requires local validation.",
+              "fontSize": 18.69,
+              "typeface": "Helvetica Neue",
+              "color": "#6B7280",
+              "alignment": "left"
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 8,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/edcj29sn",
+      "id": "8",
+      "name": "08",
+      "bbox": [
+        1460,
+        845,
+        60,
+        30
+      ],
+      "geometry": "rect",
+      "text": "08",
+      "textPreview": "08",
+      "resolvedFontSize": 18.69,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 18.69,
+        "typeface": "Helvetica Neue",
+        "color": "#6B7280",
+        "alignment": "right",
+        "verticalAlignment": "top",
+        "wrap": "square",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "08"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "08",
+          "resolvedTextStyle": {
+            "fontSize": 18.69,
+            "typeface": "Helvetica Neue",
+            "color": "#6B7280",
+            "alignment": "right"
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "08",
+              "fontSize": 18.69,
+              "typeface": "Helvetica Neue",
+              "color": "#6B7280",
+              "alignment": "right"
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    }
+  ],
+  "composeRuns": []
+}

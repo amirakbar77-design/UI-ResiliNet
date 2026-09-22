@@ -66,10 +66,11 @@ type Anchor = {
   liftMetres: number;
 };
 
-/** ground = home oblique; overview = top-down; site = behind the depot looking down the valley. */
-export type View = 'ground' | 'overview' | 'site';
+/** ground = home oblique; overview = rain map; network = full-valley search; site = depot/winner close-up. */
+export type View = 'ground' | 'overview' | 'network' | 'site';
 
 type SceneHandle = {
+  setPaused: (paused: boolean) => void;
   setLayers: (layers: Record<LayerKey, boolean>) => void;
   /** Tweens the camera to the oblique home view or a top-down overview. */
   flyTo: (view: View) => void;
@@ -213,6 +214,7 @@ function createScene(
   anchors: Anchor[],
   markerElements: Map<string, HTMLDivElement>,
   initialLevel: number,
+  illustrated: boolean,
 ): SceneHandle {
   const { meta, elevation, hand, width, height } = terrain;
   const g = sceneGrid(meta);
@@ -226,7 +228,7 @@ function createScene(
   });
   renderer.setPixelRatio(Math.min(deviceRatio, 1.5));
   // Shows around the tile in the overview, where the sky is switched off.
-  renderer.setClearColor(0x07111b, 1);
+  renderer.setClearColor(illustrated ? 0x9ad9ec : 0x07111b, 1);
   renderer.setSize(container.clientWidth, container.clientHeight, false);
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.domElement.style.width = '100%';
@@ -287,7 +289,7 @@ function createScene(
 
   // The Sentinel-2 drape already carries its own illumination, so the scene
   // lights mostly lift it and add just enough directional shaping for relief.
-  scene.add(new THREE.AmbientLight(0xffffff, 1.1));
+  scene.add(new THREE.AmbientLight(0xffffff, illustrated ? 0.65 : 1.1));
   scene.add(new THREE.HemisphereLight(0xcfe4f3, 0x3b4433, 0.45));
   const sun = new THREE.DirectionalLight(0xfff4e4, SUN_GROUND);
   sun.position.set(-400, 520, 260);
@@ -350,15 +352,84 @@ function createScene(
   surfaceTexture.wrapT = THREE.ClampToEdgeWrapping;
   surfaceTexture.needsUpdate = true;
 
+  // A simplified, height-tinted diorama for the guided story. Only the
+  // material changes: elevation, flood extent and route calculations stay real.
+  const toonSteps = illustrated
+    ? new THREE.DataTexture(new Uint8Array([110, 165, 210, 255]), 4, 1, THREE.RedFormat)
+    : null;
+  if (toonSteps) {
+    toonSteps.minFilter = THREE.NearestFilter;
+    toonSteps.magFilter = THREE.NearestFilter;
+    toonSteps.generateMipmaps = false;
+    toonSteps.needsUpdate = true;
+    const colors = new Float32Array(vertexCount * 3);
+    const lowland = new THREE.Color('#a8d45b');
+    const upland = new THREE.Color('#379b70');
+    const summit = new THREE.Color('#f4db91');
+    const tint = new THREE.Color();
+    for (let i = 0; i < vertexCount; i += 1) {
+      const height = Math.max(0, elevation[i]!);
+      tint.copy(lowland).lerp(upland, Math.min(Math.floor(height / 110) / 5, 1));
+      tint.lerp(summit, Math.max(0, Math.min((height - 550) / 1300, 1)));
+      tint.toArray(colors, i * 3);
+    }
+    terrainGeometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  }
+  // Flat normals give each original terrain triangle a crisp paper-model face.
+  // Keep the exact vertices so floodwater, roads and markers still align.
+  const displayGeometry = illustrated ? terrainGeometry.toNonIndexed() : terrainGeometry;
+  if (illustrated) {
+    displayGeometry.computeVertexNormals();
+    terrainGeometry.dispose();
+  }
   const terrainMesh = new THREE.Mesh(
-    terrainGeometry,
-    new THREE.MeshStandardMaterial({
+    displayGeometry,
+    illustrated ? new THREE.MeshToonMaterial({
+      vertexColors: true,
+      gradientMap: toonSteps,
+    }) : new THREE.MeshStandardMaterial({
       map: surfaceTexture,
       roughness: 1,
       metalness: 0,
     }),
   );
   scene.add(terrainMesh);
+
+  if (illustrated) {
+    const treeCells: number[] = [];
+    const stride = Math.max(1, Math.floor(width / 28));
+    for (let row = stride; row < height - stride; row += stride) {
+      for (let col = stride; col < width - stride; col += stride) {
+        const i = row * width + col;
+        if (elevation[i]! > 90 && hand[i]! >= 200 && (row / stride + col / stride) % 3 === 0) treeCells.push(i);
+      }
+    }
+    // Small toy trees are decorative vegetation, never candidate tower sites.
+    const trees = new THREE.InstancedMesh(
+      new THREE.ConeGeometry(1, 1, 5),
+      new THREE.MeshToonMaterial({ color: '#237b60', gradientMap: toonSteps }),
+      treeCells.length,
+    );
+    const trunks = new THREE.InstancedMesh(
+      new THREE.CylinderGeometry(0.13, 0.16, 0.5, 5).translate(0, -0.4, 0),
+      new THREE.MeshToonMaterial({ color: '#986b43', gradientMap: toonSteps }),
+      treeCells.length,
+    );
+    const pose = new THREE.Object3D();
+    const treeSize = Math.min(g.extentX, g.extentZ) / 65;
+    treeCells.forEach((i, index) => {
+      const size = treeSize * (0.7 + (index % 4) * 0.12);
+      pose.position.set(positions[i * 3]!, positions[i * 3 + 1]! + size * 0.6, positions[i * 3 + 2]!);
+      pose.scale.set(size * 0.45, size * 1.2, size * 0.45);
+      pose.rotation.y = index * 2.4;
+      pose.updateMatrix();
+      trees.setMatrixAt(index, pose.matrix);
+      trunks.setMatrixAt(index, pose.matrix);
+    });
+    trees.instanceMatrix.needsUpdate = true;
+    trunks.instanceMatrix.needsUpdate = true;
+    scene.add(trees, trunks);
+  }
 
   const worldToCell = (x: number, z: number) => ({
     col: clamp((x + originX) / g.xStep, 0, width - 1.001),
@@ -408,8 +479,8 @@ function createScene(
   };
 
   // --- Flood surface from the baked HAND raster --------------------------
-  const shallowTint = new THREE.Color('#8fd8f5');
-  const deepTint = new THREE.Color('#0a4f92');
+  const shallowTint = new THREE.Color(illustrated ? '#71e8f3' : '#8fd8f5');
+  const deepTint = new THREE.Color(illustrated ? '#168ec7' : '#0a4f92');
   const floodGeometry = new THREE.BufferGeometry();
   const floodMesh = new THREE.Mesh(
     floodGeometry,
@@ -417,7 +488,7 @@ function createScene(
       vertexColors: true,
       transparent: true,
       depthWrite: false,
-      roughness: 0.15,
+      roughness: illustrated ? 0.85 : 0.15,
       metalness: 0.05,
     }),
   );
@@ -705,6 +776,10 @@ function createScene(
     onSitesDone: () => void;
   };
   let wave: Wave | null = null;
+  let pausedAt: number | null = null;
+  let pausedDuration = 0;
+  // Route and candidate animation time excludes pauses, so resume never jumps.
+  const animationNow = () => (pausedAt ?? performance.now()) - pausedDuration;
 
   // --- Candidate spawn: rings beside the lit roads, one every half second --
   type Spawn = {
@@ -779,7 +854,7 @@ function createScene(
     spawn = {
       sites,
       next: 0,
-      nextAt: performance.now(),
+      nextAt: animationNow(),
       active: [],
       done: false,
       onSiteSpawn,
@@ -790,7 +865,7 @@ function createScene(
 
   const finishSpawn = () => {
     if (!spawn || spawn.done) return;
-    const now = performance.now();
+    const now = animationNow();
     while (spawn.next < spawn.sites.length) spawnOne(now - SPAWN_PULSE_MS);
     for (const entry of spawn.active) {
       entry.ring.scale.setScalar(1);
@@ -1359,16 +1434,41 @@ function createScene(
     );
   };
 
+  // Frame the entire road search in the space beside (or above) the guide.
+  // Unlike the rain overview, this aerial view retains tower/site markers.
+  const networkFrame = () => {
+    const width = Math.max(1, container.clientWidth);
+    const height = Math.max(1, container.clientHeight);
+    const mobile = width <= 700;
+    const left = mobile ? 18 : 215;
+    const right = mobile ? width - 18 : width - (width <= 1000 ? 355 : 405);
+    const top = mobile ? 170 : 90;
+    const bottom = mobile ? height * 0.55 - 45 : height - 85;
+    const availableWidth = Math.max(width * 0.2, right - left);
+    const availableHeight = Math.max(height * 0.2, bottom - top);
+    const tanFov = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
+    const distance = Math.max(
+      g.extentX / (2 * tanFov * camera.aspect * availableWidth / width),
+      g.extentZ / (2 * tanFov * availableHeight / height),
+    ) * 1.12 + elevationToWorldY(meta.elevation.max);
+    const spanY = 2 * distance * tanFov;
+    const target = overviewTarget.clone();
+    target.x += (width / 2 - (left + right) / 2) / width * spanY * camera.aspect;
+    target.z += (height / 2 - (top + bottom) / 2) / height * spanY;
+    return { target, position: target.clone().add(new THREE.Vector3(0, distance, distance * 0.001)), distance };
+  };
+
   const applyViewState = (next: View) => {
     view = next;
     const overview = next === 'overview';
-    // 'site' is a ground view framed from the depot; only the overview changes the scene's dressing.
-    controls.enableRotate = !overview;
-    controls.minPolarAngle = overview ? 0.001 : 0.2;
-    controls.maxPolarAngle = overview ? 0.001 : 1.45;
-    controls.maxDistance = overview ? overviewDistance() * 1.35 : groundMaxDistance;
-    scene.fog = overview ? null : fog;
-    scene.background = overview ? null : sky;
+    const aerial = overview || next === 'network';
+    // Both aerial views remove fog; only the forecast overview adds rain.
+    controls.enableRotate = !aerial;
+    controls.minPolarAngle = aerial ? 0.001 : 0.2;
+    controls.maxPolarAngle = aerial ? 0.001 : 1.45;
+    controls.maxDistance = next === 'network' ? networkFrame().distance * 1.35 : overview ? overviewDistance() * 1.35 : groundMaxDistance;
+    scene.fog = aerial ? null : fog;
+    scene.background = aerial ? null : sky;
     sun.intensity = overview ? SUN_OVERVIEW : SUN_GROUND;
     rainPlane.visible = overview && forecast !== null;
   };
@@ -1610,7 +1710,7 @@ function createScene(
     } else {
       // Two-finger scroll: sideways orbits, up and down flies. Signs follow
       // natural scrolling so the world moves with the fingers.
-      if (view !== 'overview') orbitPending += deltaX * SWIPE_ORBIT_RATE;
+      if (view !== 'overview' && view !== 'network') orbitPending += deltaX * SWIPE_ORBIT_RATE;
       flyPending -= deltaY * SWIPE_FLY_RATE;
     }
     gestureUntil = performance.now() + GESTURE_TAIL_MS;
@@ -1723,21 +1823,24 @@ function createScene(
     const gesturing = dragging || now < gestureUntil;
     const idle = now - lastInteraction > IDLE_DRIFT_DELAY;
     controls.autoRotate =
-      idle && !reduceMotion?.matches && view !== 'overview' && !flight;
+      pausedAt === null && idle && !reduceMotion?.matches && view !== 'overview' && view !== 'network' && !flight;
     // OrbitControls damps per update() call; scale the factor by the frame
     // interval so the feel is the same at 60 Hz and on a 120 Hz display.
     controls.dampingFactor = 1 - Math.pow(1 - BASE_DAMPING, dtMs / (1000 / 60));
     if (flight) {
       // The tween owns the camera; OrbitControls would clamp it mid-flight.
-      stepFlight(dt);
+      if (pausedAt === null) stepFlight(dt);
     } else {
       applyGestures(dt);
       controls.update(dt);
-      clampPivot(dt, gesturing);
+      if (view !== 'network') clampPivot(dt, gesturing);
     }
-    stepWave(now);
-    stepSpawn(now);
-    stepConvoyRing(now);
+    if (pausedAt === null) {
+      const animationTime = animationNow();
+      stepWave(animationTime);
+      stepSpawn(animationTime);
+      stepConvoyRing(animationTime);
+    }
     adaptResolution(dtMs, gesturing);
     updateMarkers();
     renderer.render(scene, camera);
@@ -1750,7 +1853,19 @@ function createScene(
     camera.aspect = viewWidth / viewHeight;
     // A portrait phone puts the overview camera far higher than a landscape
     // screen does; keep the far plane beyond it or the tile goes black.
-    camera.far = Math.max(3000, overviewDistance() * 2.2);
+    camera.far = Math.max(3000, overviewDistance() * 2.2, networkFrame().distance * 2.2);
+    if (view === 'network' || flight?.to === 'network') {
+      const frame = networkFrame();
+      if (flight) {
+        flight.toPosition.copy(frame.position);
+        flight.toTarget.copy(frame.target);
+      } else {
+        camera.position.copy(frame.position);
+        controls.target.copy(frame.target);
+        controls.maxDistance = frame.distance * 1.35;
+        controls.update();
+      }
+    }
     camera.updateProjectionMatrix();
     renderer.setSize(viewWidth, viewHeight, false);
   };
@@ -1772,6 +1887,13 @@ function createScene(
   document.addEventListener('visibilitychange', onVisibility);
 
   return {
+    setPaused(paused) {
+      if (paused && pausedAt === null) pausedAt = performance.now();
+      else if (!paused && pausedAt !== null) {
+        pausedDuration += performance.now() - pausedAt;
+        pausedAt = null;
+      }
+    },
     setLayers(layers) {
       layerState = layers;
       floodMesh.visible = layers.flood;
@@ -1808,7 +1930,7 @@ function createScene(
       }
       wave = {
         evaluation,
-        startedAt: performance.now(),
+        startedAt: animationNow(),
         progressKm: 0,
         done: false,
         onProgress: callbacks.onProgress,
@@ -1947,13 +2069,16 @@ function createScene(
       orbitPending = 0;
       flyPending = 0;
       lastInteraction = performance.now();
-      const toPosition =
+      const aerialFrame = next === 'network' ? networkFrame() : null;
+      camera.far = Math.max(camera.far, (aerialFrame?.distance ?? 0) * 2.2);
+      camera.updateProjectionMatrix();
+      const toPosition = aerialFrame ? aerialFrame.position :
         next === 'overview'
           ? overviewPosition()
           : next === 'site'
             ? sitePosition.clone()
             : homePosition.clone();
-      const toTarget =
+      const toTarget = aerialFrame ? aerialFrame.target :
         next === 'overview'
           ? overviewTarget.clone()
           : next === 'site'
@@ -1970,8 +2095,8 @@ function createScene(
       }
       // Sky, fog and the rain layer switch at take-off so nothing pops at
       // the end.
-      scene.fog = next === 'overview' ? null : fog;
-      scene.background = next === 'overview' ? null : sky;
+      scene.fog = next === 'overview' || next === 'network' ? null : fog;
+      scene.background = next === 'overview' || next === 'network' ? null : sky;
       rainPlane.visible = next === 'overview' && forecast !== null;
       controls.enabled = false;
       flight = {
@@ -1987,9 +2112,10 @@ function createScene(
     resetView() {
       flight = null;
       controls.enabled = true;
-      applyViewState('ground');
-      camera.position.copy(homePosition);
-      controls.target.copy(homeTarget);
+      const aerialFrame = view === 'network' ? networkFrame() : null;
+      applyViewState(aerialFrame ? 'network' : 'ground');
+      camera.position.copy(aerialFrame?.position ?? homePosition);
+      controls.target.copy(aerialFrame?.target ?? homeTarget);
       zoomActive = false;
       zoomAnchorValid = false;
       orbitPending = 0;
@@ -2019,6 +2145,7 @@ function createScene(
         }
       });
       surfaceTexture.dispose();
+      toonSteps?.dispose();
       rainTexture.dispose();
       blockGeometry.dispose();
       blockMaterial.dispose();
@@ -2063,6 +2190,8 @@ export type RouteNetwork = {
 };
 
 export function Terrain3D({
+  illustrated = false,
+  paused = false,
   assetBase,
   layers,
   level,
@@ -2084,6 +2213,8 @@ export function Terrain3D({
   topUpIds,
   resetSignal,
 }: {
+  illustrated?: boolean;
+  paused?: boolean;
   /** Which valley's baked assets to draw; see `lib/maps`. */
   assetBase: string;
   layers: Record<LayerKey, boolean>;
@@ -2155,13 +2286,18 @@ export function Terrain3D({
       anchors,
       markerRefs.current,
       levelRef.current,
+      illustrated,
     );
     sceneRef.current = handle;
     return () => {
       sceneRef.current = null;
       handle.dispose();
     };
-  }, [terrain, anchors]);
+  }, [terrain, anchors, illustrated]);
+
+  useEffect(() => {
+    sceneRef.current?.setPaused(paused);
+  }, [paused, terrain]);
 
   // The scene only exists once the terrain assets arrive, so these must
   // re-run at that point as well as when the control changes.
@@ -2252,7 +2388,7 @@ export function Terrain3D({
   };
 
   return (
-    <div className="absolute inset-0">
+    <div className={`absolute inset-0 ${illustrated ? 'illustrated-terrain' : ''}`}>
       <div ref={containerRef} className="size-full" />
       {!terrain && (
         <p className="absolute inset-x-0 top-1/2 text-center text-xs font-medium tracking-[0.08em] text-white/70 uppercase">

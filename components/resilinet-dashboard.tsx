@@ -34,6 +34,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Slider } from '@/components/ui/slider';
 import { Switch } from '@/components/ui/switch';
+import { GuidedDemo } from '@/components/demo-simulation';
 import { MethodPanel } from '@/components/method-panel';
 import type { RouteRun, SiteMarkerState, View } from '@/components/terrain-3d';
 import {
@@ -451,6 +452,8 @@ function TerrainFallback() {
 }
 
 function TerrainStage({
+  illustrated = false,
+  paused = false,
   map,
   layers,
   level,
@@ -472,6 +475,8 @@ function TerrainStage({
   topUpIds,
   resetSignal,
 }: {
+  illustrated?: boolean;
+  paused?: boolean;
   map: MapSpec;
   layers: Record<LayerKey, boolean>;
   level: number;
@@ -500,6 +505,8 @@ function TerrainStage({
     >
       <Suspense fallback={<TerrainFallback />}>
         <Terrain3D
+          illustrated={illustrated}
+          paused={paused}
           assetBase={map.assetBase}
           layers={layers}
           level={level}
@@ -522,7 +529,7 @@ function TerrainStage({
           resetSignal={resetSignal}
         />
       </Suspense>
-      <div className="map-vignette pointer-events-none absolute inset-0" />
+      <div className={`map-vignette pointer-events-none absolute inset-0 ${illustrated ? 'opacity-20' : ''}`} />
       <p className="pointer-events-none absolute bottom-1 right-3 z-20 hidden text-[10px] leading-4 text-white/45 lg:block">
         Elevation NASA SRTM · Imagery Sentinel-2 cloudless by EOX (CC BY 4.0,
         ESA Copernicus) · Roads, rail & settlements © OpenStreetMap contributors (ODbL)
@@ -1770,7 +1777,7 @@ function MobileAnalysis({
   );
 }
 
-export function ResilinetDashboard() {
+export function ResilinetDashboard({ guided = false }: { guided?: boolean }) {
   const [layers, setLayers] = useState<Record<LayerKey, boolean>>({
     coverage: true,
     towers: true,
@@ -1780,6 +1787,7 @@ export function ResilinetDashboard() {
     population: true,
   });
   const [stage, setStage] = useState<Stage>('now');
+  const [demoPaused, setDemoPaused] = useState(false);
   // Which valley is on screen. The chip above the layer panel switches it;
   // everything below reads its constants out of `lib/maps`.
   const [mapId, setMapId] = useState<MapId>(DEFAULT_MAP);
@@ -1955,7 +1963,7 @@ export function ResilinetDashboard() {
   // Now: the home oblique. Forecast: top-down. Site: from behind the depot,
   // so the route wave starts in the foreground and runs away down the valley.
   const view: View =
-    stage === 'forecast' ? 'overview' : stage === 'site' ? 'site' : 'ground';
+    stage === 'forecast' ? 'overview' : stage === 'site' ? (guided && !route?.sitesDone ? 'network' : 'site') : 'ground';
   // The forecast stage plays itself the first time it opens for an event,
   // from hour 0, unless the viewer prefers reduced motion.
   const reduceMotion = () => globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
@@ -2191,6 +2199,8 @@ export function ResilinetDashboard() {
   return (
     <main className="relative h-[100dvh] w-screen overflow-hidden bg-slate-900 text-slate-100">
       <TerrainStage
+        illustrated={guided}
+        paused={guided && demoPaused}
         map={map}
         layers={layers}
         level={level}
@@ -2212,6 +2222,21 @@ export function ResilinetDashboard() {
         topUpIds={topUpIds}
         resetSignal={resetSignal}
       />
+      {guided ? <GuidedDemo
+        paused={demoPaused} onPause={setDemoPaused}
+        stage={stage} ready={routesReady} hour={forecastHour}
+        maxHour={Math.max(1, (curve?.levels.length ?? 2) - 1)}
+        levels={curve?.levels ?? []} playingForecast={!forecastPlayed}
+        onHour={setChosenHour} onForecastEnd={onForecastSettle}
+        onNext={onNext} onStage={changeStage} onStart={onStartRoutes}
+        onSkip={onSkipRoutes} running={route !== null && !route.sitesDone}
+        done={route?.sitesDone ?? false} reachableKm={route?.reachableKm ?? 0}
+        checked={route?.spawned.length ?? 0} total={route?.sites.length ?? 0}
+        recommendation={route?.recommendation ?? null}
+        withoutSignal={hole?.count ?? null}
+        onReset={() => { changeStage('now'); setSiteOverrides({}); setForecastPlayed(false); setChosenHour(null); setResetSignal(n => n + 1); }}
+        onResetView={() => setResetSignal(n => n + 1)}
+      /> : <>
       <TopBar stage={stage} setStage={changeStage} />
       <UtilityRail methodOpen={methodOpen} onOpenMethod={() => setMethodOpen(true)} />
       <LayerPanel
@@ -2309,6 +2334,7 @@ export function ResilinetDashboard() {
         </button>
       </div>
       <div className="pointer-events-none absolute inset-x-0 top-14 z-20 h-px bg-gradient-to-r from-transparent via-sky-300/25 to-transparent" />
+      </>}
     </main>
   );
 }

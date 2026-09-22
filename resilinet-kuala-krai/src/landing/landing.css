@@ -1,0 +1,394 @@
+/* Landing chrome. Same design law as the console: light near-neutral surfaces,
+   hairlines instead of shadows, one accent, and status red reserved for the
+   thing that is actually broken. Every colour comes from tokens.css. */
+
+.landing {
+  position: fixed;
+  inset: 0;
+  background: var(--surface-sunken);
+  color: var(--text-primary);
+  overflow: hidden;
+}
+
+.landing-stage {
+  position: absolute;
+  inset: 0;
+}
+
+.landing-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  cursor: grab;
+  touch-action: none;
+}
+.landing-canvas:active {
+  cursor: grabbing;
+}
+
+/* ---- header ------------------------------------------------------------ */
+.landing-head {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-4);
+  pointer-events: none;
+}
+
+.landing-wordmark {
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.landing-tagline {
+  margin-top: 4px;
+  max-width: 46ch;
+  font-size: 13px;
+  line-height: 1.35;
+  color: var(--text-secondary);
+  text-shadow: 0 0 12px var(--surface-sunken), 0 0 4px var(--surface-sunken);
+}
+
+.landing-actions {
+  pointer-events: auto;
+  text-align: right;
+  flex: 0 0 auto;
+}
+
+.landing-cta {
+  padding: 11px 20px;
+  border: var(--border-width) solid var(--accent);
+  border-radius: var(--radius-md);
+  background: var(--accent);
+  color: var(--text-on-accent);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.landing-cta:hover {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+.landing-cta:focus-visible {
+  outline: 2px solid var(--text-primary);
+  outline-offset: 2px;
+}
+
+.landing-cta-sub {
+  margin-top: 6px;
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+}
+
+/* ---- counter and dial -------------------------------------------------- */
+.landing-chip {
+  position: absolute;
+  top: 108px;
+  right: var(--space-4);
+  min-width: 232px;
+  padding: 14px 16px 12px;
+  background: rgba(255, 255, 255, 0.94);
+  border: var(--border-width) solid var(--hairline);
+  border-radius: var(--radius-md);
+}
+
+.landing-chip-num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 42px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.01em;
+}
+
+.landing-chip-label {
+  margin-top: 5px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.landing-chip-sub {
+  margin-top: 2px;
+  font-size: 11.5px;
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+}
+
+.landing-chip[data-tone="teal"] {
+  border-color: var(--accent);
+}
+.landing-chip[data-tone="teal"] .landing-chip-num,
+.landing-chip[data-tone="teal"] .landing-chip-label {
+  color: var(--accent);
+}
+.landing-chip[data-tone="red"] {
+  border-color: var(--status-disrupted);
+}
+.landing-chip[data-tone="red"] .landing-chip-num,
+.landing-chip[data-tone="red"] .landing-chip-label {
+  color: var(--status-disrupted);
+}
+
+.landing-stage-chip {
+  position: absolute;
+  top: 258px;
+  right: var(--space-4);
+  padding: 5px 12px;
+  background: rgba(255, 255, 255, 0.92);
+  border: var(--border-width) solid var(--hairline);
+  border-radius: 999px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+.landing-stage-chip span {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+/* ---- caption ----------------------------------------------------------- */
+.landing-caption {
+  position: absolute;
+  left: var(--space-4);
+  bottom: 64px;
+  max-width: min(560px, calc(100vw - 2 * var(--space-4)));
+  pointer-events: none;
+}
+
+.landing-eyebrow,
+.landing-heading,
+.landing-sub {
+  text-shadow: 0 0 14px var(--surface-sunken), 0 0 4px var(--surface-sunken);
+  animation: landing-rise 0.5s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+.landing-eyebrow {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.landing-caption[data-tone="red"] .landing-eyebrow {
+  color: var(--status-disrupted);
+}
+
+.landing-heading {
+  margin: 6px 0;
+  font-size: clamp(24px, 3.4vw, 36px);
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  line-height: 1.05;
+  text-wrap: balance;
+  animation-delay: 0.05s;
+}
+
+.landing-sub {
+  margin: 0;
+  max-width: 48ch;
+  font-size: 14px;
+  line-height: 1.35;
+  color: var(--text-secondary);
+  animation-delay: 0.1s;
+}
+
+@keyframes landing-rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* ---- act buttons ------------------------------------------------------- */
+.landing-dots {
+  position: absolute;
+  right: var(--space-4);
+  bottom: 64px;
+  display: flex;
+  gap: 8px;
+}
+
+.landing-dot {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: var(--border-width) solid var(--hairline);
+  border-radius: 50%;
+  background: var(--surface);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  cursor: pointer;
+}
+.landing-dot:hover {
+  border-color: var(--accent);
+}
+.landing-dot:focus-visible {
+  outline: 2px solid var(--text-primary);
+  outline-offset: 2px;
+}
+.landing-dot[aria-current="true"] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--text-on-accent);
+}
+.landing-play {
+  margin-left: 6px;
+  font-size: 10px;
+}
+
+/* ---- pointer, tip, ripple ---------------------------------------------- */
+.landing-cursor {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 3;
+  opacity: 0;
+  pointer-events: none;
+  filter: drop-shadow(0 2px 5px rgba(16, 23, 28, 0.35));
+}
+
+.landing-tip {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 3;
+  max-width: 252px;
+  padding: 8px 11px;
+  opacity: 0;
+  pointer-events: none;
+  background: rgba(255, 255, 255, 0.96);
+  border: var(--border-width) solid var(--hairline);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius-sm);
+}
+.landing-tip b {
+  display: block;
+  font-size: 12.5px;
+}
+.landing-tip span {
+  display: block;
+  font-size: 11px;
+  line-height: 1.25;
+  color: var(--text-secondary);
+}
+
+.landing-ripple {
+  position: absolute;
+  z-index: 2;
+  width: 40px;
+  height: 40px;
+  border: 2.5px solid var(--accent);
+  border-radius: 50%;
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+}
+
+/* ---- footer ------------------------------------------------------------ */
+.landing-foot {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: 10px var(--space-4);
+  font-size: 11px;
+  color: var(--text-secondary);
+  border-top: var(--border-width) solid var(--hairline);
+  background: rgba(236, 239, 241, 0.92);
+}
+.landing-hint {
+  white-space: nowrap;
+}
+
+/* ---- handover ---------------------------------------------------------- */
+.landing-loading {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: var(--surface-sunken);
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+@media (max-width: 900px) {
+  .landing-chip {
+    top: 96px;
+    min-width: 180px;
+    padding: 10px 12px 9px;
+  }
+  .landing-chip-num {
+    font-size: 30px;
+  }
+  .landing-stage-chip {
+    top: 212px;
+  }
+  .landing-dots {
+    display: none;
+  }
+  .landing-foot {
+    flex-direction: column;
+    gap: 2px;
+  }
+  .landing-hint {
+    white-space: normal;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .landing-eyebrow,
+  .landing-heading,
+  .landing-sub {
+    animation: none;
+  }
+}
+
+/* Keep the reference's playback controls available on touch screens. */
+@media (max-width: 900px) {
+  .landing-dots { display: flex; bottom: 78px; }
+  .landing-caption { bottom: 128px; }
+}
+@media (max-width: 600px) {
+  .landing-head { flex-direction: column; gap: 10px; }
+  .landing-actions { text-align: left; }
+  .landing-cta { padding: 8px 12px; font-size: 12px; }
+  .landing-cta-sub { font-size: 10px; margin-top: 5px; }
+  .landing-tagline { font-size: 11px; max-width: 42ch; }
+  .landing-chip { top: 175px; min-width: 140px; padding: 8px 10px; }
+  .landing-chip-num { font-size: 25px; }
+  .landing-stage-chip { top: 290px; font-size: 10px; }
+  .landing-caption { bottom: 136px; }
+  .landing-heading { font-size: 25px; }
+  .landing-sub { font-size: 12px; }
+  .landing-dot { width: 38px; height: 38px; }
+  .landing-foot { font-size: 10px; }
+  .landing-tip { max-width: 210px; }
+}
+
+/* A quiet scrim keeps the original caption readable over the earth skirt. */
+.landing-caption::before {
+  content: "";
+  position: absolute;
+  inset: -14px -24px;
+  z-index: -1;
+  background: linear-gradient(90deg, rgba(238,241,242,.98) 0%, rgba(238,241,242,.92) 75%, rgba(238,241,242,0) 100%);
+}
+.landing-caption { isolation: isolate; }

@@ -15,6 +15,14 @@ npm run dev
 
 Open `http://localhost:3000`.
 
+## Guided 3D demo
+
+The homepage uses the same Three.js terrain, storm forecast, road evaluation, and network planning engine as the full dashboard. Four guided chapters introduce the valley, play the simulated storm, trace reachable roads, and reveal the response plan. Dark floating panels explain each step in plain language while leaving the 3D map interactive. During the road and site search, the camera lifts into a full-valley aerial view framed beside the desktop guide or above the mobile guide. It stays wide until the recommendation is ready, then moves in to the selected tower.
+
+The demo starts automatically once its data is ready and loops through all four chapters. It holds the introduction for 6.5 seconds, plays the storm, briefly introduces the response search, waits for the road and site animations to finish, then holds the result for 10 seconds before restarting. The small header pause/resume control freezes chapter timing, forecast playback, camera flights, road tracing, and candidate animations without skipping ahead on resume. Scrubbing the forecast also pauses the demo. Manual navigation and replay remain available. Outcomes come from the app's model and population raster, rather than fictional preset totals. The storm and model assumptions remain illustrative, not operational advice.
+
+The full dashboard is available at `/explore` through **Explore the full app**.
+
 ## Two valleys
 
 The place chip above the layer panel switches between two baked areas. The engine is the same for both — routing, viewsheds, the network model, the recommendation and the population counts read only from the baked assets — so a valley is a bake plus an entry in `lib/maps.ts`.
